@@ -79,8 +79,8 @@ COPY --from=builder /app/.compile-cache /app/.compile-cache
 COPY --from=builder /app/docs/reference /app/docs/reference
 
 # Copy built-in skills from builder (Layer 1)
-# clawhub installs to /root/.openclaw/skills/ and /skills/
-COPY --from=builder /root/.openclaw/skills /root/.openclaw/skills
+# clawhub installs to /skills/ directory
+COPY --from=builder /skills /root/.openclaw/skills
 
 WORKDIR /app
 
