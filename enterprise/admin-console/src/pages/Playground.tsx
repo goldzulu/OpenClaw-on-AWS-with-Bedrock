@@ -1,7 +1,24 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Send, User, Bot, Shield, Eye, Terminal, Loader } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { Card, Badge, Button, PageHeader, Select } from '../components/ui';
-import { usePlaygroundProfiles, usePlaygroundSend } from '../hooks/useApi';
+import { usePlaygroundProfiles } from '../hooks/useApi';
+import { api } from '../api/client';
+
+interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; timestamp: string; }
+
+const STORAGE_KEY = 'openclaw_playground_chat';
+
+function loadMessages(tenantId: string): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(`${STORAGE_KEY}_${tenantId}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveMessages(tenantId: string, messages: ChatMessage[]) {
+  localStorage.setItem(`${STORAGE_KEY}_${tenantId}`, JSON.stringify(messages));
+}
 
 interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; timestamp: string; }
 
@@ -14,58 +31,61 @@ const TENANT_OPTIONS = [
 
 export default function Playground() {
   const { data: profiles } = usePlaygroundProfiles();
-  const sendMut = usePlaygroundSend();
   const [tenantId, setTenantId] = useState(TENANT_OPTIONS[0].value);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => loadMessages(TENANT_OPTIONS[0].value));
   const [inputValue, setInputValue] = useState('');
   const [lastPlanE, setLastPlanE] = useState('No messages processed yet');
   const [mode, setMode] = useState<'simulate' | 'live'>('simulate');
+  const [sending, setSending] = useState(false);
 
   const profile = profiles?.[tenantId] || { role: 'loading', tools: [], planA: '', planE: '' };
   const profileLoaded = !!profiles?.[tenantId];
 
+  // Persist messages
+  useEffect(() => { saveMessages(tenantId, messages); }, [messages, tenantId]);
+
   useEffect(() => {
     if (!profileLoaded) return;
-    setMessages([{ role: 'system', content: `🔒 Tenant context loaded: ${profile.role} role, ${profile.tools.length} tools`, timestamp: '' }]);
+    const saved = loadMessages(tenantId);
+    if (saved.length > 0) {
+      setMessages(saved);
+    } else {
+      setMessages([{ role: 'system', content: `🔒 Tenant context loaded: ${profile.role} role, ${profile.tools.length} tools`, timestamp: '' }]);
+    }
     setLastPlanE('No messages processed yet');
   }, [tenantId, profileLoaded]);
 
-  const handleSend = () => {
-    if (!inputValue.trim()) return;
+  const handleSend = async () => {
+    if (!inputValue.trim() || sending) return;
     const now = new Date().toLocaleTimeString();
     const msg = inputValue.trim();
     const userMsg: ChatMessage = { role: 'user', content: msg, timestamp: now };
     setMessages(prev => [...prev, userMsg]);
     setInputValue('');
+    setSending(true);
 
-    sendMut.mutate({ tenant_id: tenantId, message: msg, mode }, {
-      onSuccess: (data) => {
-        const assistantMsg: ChatMessage = { role: 'assistant', content: data.response, timestamp: new Date().toLocaleTimeString() };
-        setMessages(prev => [...prev, assistantMsg]);
-        setLastPlanE(data.plan_e);
-      },
-      onError: (err) => {
-        const errMsg = mode === 'live'
-          ? '⏳ Agent is warming up (cold start ~25s). Retrying...'
-          : '⚠️ Error communicating with agent';
-        setMessages(prev => [...prev, { role: 'assistant', content: errMsg, timestamp: new Date().toLocaleTimeString() }]);
-        // Auto-retry once for live mode (cold start)
-        if (mode === 'live') {
-          setTimeout(() => {
-            sendMut.mutate({ tenant_id: tenantId, message: msg, mode }, {
-              onSuccess: (data) => {
-                const retryMsg: ChatMessage = { role: 'assistant', content: data.response, timestamp: new Date().toLocaleTimeString() };
-                setMessages(prev => [...prev, retryMsg]);
-                setLastPlanE(data.plan_e);
-              },
-              onError: () => {
-                setMessages(prev => [...prev, { role: 'assistant', content: 'Agent is still starting up. Please try again in ~30 seconds.', timestamp: new Date().toLocaleTimeString() }]);
-              },
-            });
-          }, 3000);
+    try {
+      const data = await api.post<{ response: string; plan_e: string }>('/playground/send', { tenant_id: tenantId, message: msg, mode });
+      setMessages(prev => [...prev, { role: 'assistant', content: data.response, timestamp: new Date().toLocaleTimeString() }]);
+      setLastPlanE(data.plan_e);
+    } catch (e) {
+      if (mode === 'live') {
+        setMessages(prev => [...prev, { role: 'assistant', content: '⏳ Agent is warming up (cold start ~25s). Retrying...', timestamp: new Date().toLocaleTimeString() }]);
+        // Retry after 5s
+        try {
+          await new Promise(r => setTimeout(r, 5000));
+          const retry = await api.post<{ response: string; plan_e: string }>('/playground/send', { tenant_id: tenantId, message: msg, mode });
+          setMessages(prev => [...prev, { role: 'assistant', content: retry.response, timestamp: new Date().toLocaleTimeString() }]);
+          setLastPlanE(retry.plan_e);
+        } catch {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Agent is still starting up. Please try again in ~30 seconds.', timestamp: new Date().toLocaleTimeString() }]);
         }
-      },
-    });
+      } else {
+        setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Error communicating with agent', timestamp: new Date().toLocaleTimeString() }]);
+      }
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -98,11 +118,17 @@ export default function Playground() {
                       {msg.timestamp && ` · ${msg.timestamp}`}
                     </span>
                   </div>
-                  <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                  {msg.role === 'assistant' ? (
+                    <div className="text-sm prose prose-invert prose-sm max-w-none [&_p]:my-1 [&_h1]:text-base [&_h1]:font-bold [&_h2]:text-sm [&_h2]:font-semibold [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_code]:bg-dark-bg [&_code]:px-1 [&_code]:rounded [&_pre]:bg-dark-bg [&_pre]:p-3 [&_pre]:rounded-lg [&_strong]:text-text-primary">
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                  )}
                 </div>
               </div>
             ))}
-            {sendMut.isPending && (
+            {sending && (
               <div className="flex justify-start">
                 <div className="rounded-lg bg-dark-card border border-dark-border px-3 py-2">
                   <Loader size={14} className="animate-spin text-primary" />
@@ -113,10 +139,10 @@ export default function Playground() {
 
           <div className="flex gap-2">
             <input value={inputValue} onChange={e => setInputValue(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !sendMut.isPending) handleSend(); }}
+              onKeyDown={e => { if (e.key === 'Enter' && !sending) handleSend(); }}
               placeholder="Type a message (try 'run shell command')..."
               className="flex-1 rounded-lg border border-dark-border bg-dark-bg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-primary focus:outline-none" />
-            <Button variant="primary" onClick={handleSend} disabled={sendMut.isPending}><Send size={16} /></Button>
+            <Button variant="primary" onClick={handleSend} disabled={sending}><Send size={16} /></Button>
           </div>
         </Card>
 
