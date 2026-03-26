@@ -33,8 +33,9 @@ const FAST_PATH_ENABLED = process.env.FAST_PATH_ENABLED !== 'false';
 // Tenant state expiry: after this many ms without activity, tenant goes back to cold
 // AgentCore idle timeout is 15 min, so we use 20 min to be safe
 const TENANT_WARM_TTL_MS = parseInt(process.env.TENANT_WARM_TTL_MS || '1200000');
-// Warming timeout: how long to wait for Tenant Router before falling back to fast-path
-const WARMING_TIMEOUT_MS = parseInt(process.env.WARMING_TIMEOUT_MS || '8000');
+// Warming timeout: how long to wait for Tenant Router before falling back to fast-path.
+// AgentCore cold start + SSM lookup + S3 workspace load = 10-15s. Use 25s to be safe.
+const WARMING_TIMEOUT_MS = parseInt(process.env.WARMING_TIMEOUT_MS || '25000');
 
 function log(msg) {
   console.log(`${new Date().toISOString()} [bedrock-proxy-h2] ${msg}`);
@@ -499,7 +500,7 @@ server.on('stream', (stream, headers) => {
       // This preserves OpenClaw's full system prompt (SOUL.md) and tool defs.
       // =====================================================================
       const sessionId = parsed.system?.map(s => typeof s === 'string' ? s : s.text || '').join(' ') || '';
-      const isAdmin = sessionId.includes('admin-assistant') || sessionId.includes('IT Admin Assistant') || (userId === 'admin');
+      const isAdmin = (userId === 'admin'); // Only admin console sessions use userId='admin'; Discord SOUL content must not trigger PATH B
 
       if (isAdmin) {
         log(`PATH B: Admin bypass — proxying to real Bedrock (skip Tenant Router)`);

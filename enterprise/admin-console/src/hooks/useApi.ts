@@ -198,6 +198,14 @@ export function useAuditInsights() {
   });
 }
 
+export function useRunAuditScan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post('/audit/run-scan', {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['audit-insights'] }),
+  });
+}
+
 export interface AgentHealthItem {
   agentId: string; agentName: string; employeeName: string; positionName: string;
   status: string; qualityScore: number | null; channels: string[]; skillCount: number;
@@ -550,7 +558,7 @@ export function useDeleteUserMapping() {
 export function useApprovePairing() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { channel: string; pairingCode: string; employeeId: string; channelUserId: string }) =>
+    mutationFn: (data: { channel: string; pairingCode: string; employeeId: string; channelUserId: string; pairingUserId?: string }) =>
       api.post<{ approved: boolean; output?: string; error?: string; mappingWritten?: boolean }>('/bindings/pairing-approve', data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['user-mappings'] });

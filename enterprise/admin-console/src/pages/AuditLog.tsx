@@ -1,8 +1,8 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Download, Search, AlertTriangle, CheckCircle, XCircle, Info, Clock, Brain, Scan, Eye } from 'lucide-react';
+import { Shield, Download, Search, AlertTriangle, CheckCircle, XCircle, Info, Clock, Brain, Scan, Loader, Sparkles } from 'lucide-react';
 import { Card, Badge, Button, PageHeader, Table, StatCard, Tabs } from '../components/ui';
-import { useAuditEntries, useAuditInsights } from '../hooks/useApi';
+import { useAuditEntries, useAuditInsights, useRunAuditScan } from '../hooks/useApi';
 import type { AuditEntry } from '../types';
 
 const eventTypeOptions = [
@@ -45,7 +45,8 @@ export default function AuditLog() {
   const navigate = useNavigate();
 
   const { data: AUDIT_ENTRIES = [] } = useAuditEntries({ limit: 50, eventType: eventType !== 'all' ? eventType : undefined });
-  const { data: insightsData } = useAuditInsights();
+  const { data: insightsData, refetch: refetchInsights } = useAuditInsights();
+  const runScan = useRunAuditScan();
   const insights = insightsData?.insights || [];
   const insightsSummary = insightsData?.summary;
 
@@ -121,11 +122,30 @@ export default function AuditLog() {
                   <div>
                     <p className="text-sm font-medium text-text-primary">AI Security Scanner</p>
                     <p className="text-xs text-text-muted">
-                      Last scan: {insightsSummary?.lastScanAt ? new Date(insightsSummary.lastScanAt).toLocaleString() : '—'} · Sources: {insightsSummary?.scanSources?.join(', ') || '—'}
+                      Last scan: {insightsSummary?.lastScanAt ? new Date(insightsSummary.lastScanAt).toLocaleString() : '—'}
+                      {insightsSummary?.scanSources && ` · Sources: ${insightsSummary.scanSources.join(', ')}`}
                     </p>
                   </div>
                 </div>
-                <Button variant="default" size="sm"><Scan size={14} /> Run Scan</Button>
+                <div className="flex gap-2">
+                  <Button
+                    variant="default" size="sm"
+                    disabled={runScan.isPending}
+                    onClick={() => runScan.mutate()}
+                  >
+                    {runScan.isPending ? <Loader size={14} className="animate-spin" /> : <Scan size={14} />}
+                    {runScan.isPending ? 'Scanning...' : 'Run Scan'}
+                  </Button>
+                  <Button
+                    variant="default" size="sm"
+                    className="opacity-60 cursor-not-allowed"
+                    onClick={() => {}}
+                  >
+                    <Sparkles size={14} />
+                    Analyze Memories
+                    <span className="ml-1 text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded-full">Soon</span>
+                  </Button>
+                </div>
               </div>
 
               {/* Severity Summary */}

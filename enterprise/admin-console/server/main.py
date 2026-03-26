@@ -418,9 +418,110 @@ def get_agent(agent_id: str):
 
 @app.post("/api/v1/agents")
 def create_agent(body: dict):
+    from datetime import datetime, timezone
+    import json as _json_ca
+
     body.setdefault("status", "active")
     body.setdefault("soulVersions", {"global": 3, "position": 1, "personal": 0})
-    return db.create_agent(body)
+    body.setdefault("createdAt", datetime.now(timezone.utc).isoformat())
+    body.setdefault("updatedAt", body["createdAt"])
+
+    agent = db.create_agent(body)
+
+    emp_id = body.get("employeeId")
+    pos_id = body.get("positionId", "")
+    agent_id = body.get("id") or agent.get("id", "")
+    channel = body.get("defaultChannel", "discord")
+
+    if emp_id and pos_id:
+        # 1. Write SSM tenant→position and permissions for this employee
+        stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+        region = os.environ.get("AWS_REGION", "us-east-1")
+        pos_tools = {
+            "pos-sa": ["web_search", "shell", "browser", "file", "file_write", "code_execution"],
+            "pos-sde": ["web_search", "shell", "browser", "file", "file_write", "code_execution"],
+            "pos-devops": ["web_search", "shell", "browser", "file", "file_write", "code_execution"],
+            "pos-qa": ["web_search", "shell", "file", "code_execution"],
+            "pos-ae": ["web_search", "file", "crm-query", "email-send", "calendar-check"],
+            "pos-pm": ["web_search", "file", "notion-sync", "calendar-check", "excel-gen"],
+            "pos-fa": ["web_search", "file", "excel-gen", "sap-connector"],
+            "pos-hr": ["web_search", "file", "email-send", "calendar-check"],
+            "pos-csm": ["web_search", "file", "crm-query", "email-send"],
+            "pos-legal": ["web_search", "file"],
+            "pos-exec": ["web_search", "shell", "browser", "file", "file_write", "code_execution"],
+        }
+        tools = pos_tools.get(pos_id, ["web_search"])
+        try:
+            ssm = _ssm_client()
+            ssm.put_parameter(Name=f"/openclaw/{stack}/tenants/{emp_id}/position",
+                              Value=pos_id, Type="String", Overwrite=True)
+            ssm.put_parameter(
+                Name=f"/openclaw/{stack}/tenants/{emp_id}/permissions",
+                Value=_json_ca.dumps({"profile": "auto", "tools": tools, "role": pos_id.replace("pos-", "")}),
+                Type="String", Overwrite=True)
+        except Exception as e:
+            print(f"[create_agent] SSM write failed for {emp_id}: {e}")
+
+        # 2. Create binding (employee → agent)
+        now = datetime.now(timezone.utc).isoformat()
+        emp = next((e for e in db.get_employees() if e["id"] == emp_id), {})
+        positions = db.get_positions()
+        pos = next((p for p in positions if p["id"] == pos_id), {})
+        db.create_binding({
+            "employeeId": emp_id,
+            "employeeName": emp.get("name", ""),
+            "agentId": agent_id,
+            "agentName": body.get("name", ""),
+            "mode": "1:1",
+            "channel": channel,
+            "status": "active",
+            "source": "manual",
+            "createdAt": now,
+        })
+
+        # 3. Seed minimal S3 workspace if it doesn't already exist
+        s3_bucket = os.environ.get("S3_BUCKET", "openclaw-tenants-263168716248")
+        try:
+            import boto3 as _b3_ws
+            s3 = _b3_ws.client("s3", region_name=region)
+            # Only seed if workspace is empty
+            prefix = f"{emp_id}/workspace/"
+            resp = s3.list_objects_v2(Bucket=s3_bucket, Prefix=prefix, MaxKeys=5)
+            if not resp.get("Contents"):
+                emp_name = emp.get("name", emp_id)
+                pos_name = pos.get("name", pos_id)
+                dept = emp.get("departmentName", "")
+                # IDENTITY.md
+                s3.put_object(Bucket=s3_bucket, Key=f"{prefix}IDENTITY.md",
+                    Body=f"# Agent Identity\n\n- **Name**: {emp_name}'s AI Assistant\n- **Position**: {pos_name}\n- **Department**: {dept}\n- **Company**: ACME Corp\n- **Platform**: OpenClaw Enterprise\n".encode())
+                # MEMORY.md
+                s3.put_object(Bucket=s3_bucket, Key=f"{prefix}MEMORY.md",
+                    Body=f"# Memory\nNo previous conversations recorded.\n".encode())
+                # USER.md
+                s3.put_object(Bucket=s3_bucket, Key=f"{prefix}USER.md",
+                    Body=f"# User Profile\n\n- **Name**: {emp_name}\n- **Position**: {pos_name}\n- **Language**: English\n".encode())
+                print(f"[create_agent] S3 workspace seeded for {emp_id}")
+        except Exception as e:
+            print(f"[create_agent] S3 workspace seed failed for {emp_id}: {e}")
+
+        # 4. Update employee record with agentId
+        try:
+            emp["agentId"] = agent_id
+            emp["agentStatus"] = "active"
+            db.create_employee(emp)
+        except Exception as e:
+            print(f"[create_agent] employee update failed: {e}")
+
+        # 5. Audit trail
+        db.create_audit_entry({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "eventType": "config_change", "actorId": "admin", "actorName": "IT Admin",
+            "targetType": "agent", "targetId": agent_id,
+            "detail": f"Created agent '{body.get('name')}' for {emp.get('name', emp_id)} ({pos.get('name', pos_id)})",
+            "status": "success",
+        })
+
+    return agent
 
 
 # =========================================================================
@@ -804,10 +905,11 @@ def delete_user_mapping(channel: str, channelUserId: str):
 
 
 class PairingApproveRequest(BaseModel):
-    channel: str       # discord, telegram, feishu, slack, whatsapp
-    pairingCode: str   # e.g. KFDAF3GN
-    employeeId: str    # e.g. emp-carol
-    channelUserId: str = ""  # platform user ID (optional, for SSM mapping)
+    channel: str          # discord, telegram, feishu, slack, whatsapp
+    pairingCode: str      # e.g. KFDAF3GN
+    employeeId: str       # e.g. emp-carol
+    channelUserId: str = ""   # numeric platform user ID (from pairing message)
+    pairingUserId: str = ""   # username/handle (e.g. "wujiade4444") for dm_ mapping
 
 @app.post("/api/v1/bindings/pairing-approve")
 def approve_pairing(body: PairingApproveRequest):
@@ -833,10 +935,16 @@ def approve_pairing(body: PairingApproveRequest):
     except Exception as e:
         return {"approved": False, "error": str(e)}
 
-    # 2. Write SSM user mapping if channelUserId provided
+    # 2. Write SSM user mappings if channelUserId provided.
+    # Write ALL formats that H2 Proxy may extract, so routing works regardless of
+    # how OpenClaw formats the sender metadata (numeric ID, dm_username, username).
     mapping_written = False
     if body.channelUserId and body.employeeId:
         _write_user_mapping(body.channel, body.channelUserId, body.employeeId)
+        # Also write username-based mappings extracted by H2 Proxy from Discord DM format
+        if body.pairingUserId:  # Discord username from pairing message meta
+            _write_user_mapping(body.channel, f"dm_{body.pairingUserId}", body.employeeId)
+            _write_user_mapping(body.channel, body.pairingUserId, body.employeeId)
         # Also write position mapping for the numeric user ID (what H2 Proxy extracts)
         emp = next((e for e in db.get_employees() if e["id"] == body.employeeId), None)
         if emp and emp.get("positionId"):
@@ -868,7 +976,26 @@ def approve_pairing(body: PairingApproveRequest):
             except Exception:
                 pass
 
-    # 3. Audit trail
+    # 3. Sync updated allowFrom list to S3 so microVMs pick it up
+    # The EC2's openclaw pairing approve updates the local credentials file.
+    # We push it to S3 so AgentCore microVMs can load it on first invocation.
+    if body.channel == "discord" and body.channelUserId:
+        try:
+            creds_src = "/home/ubuntu/.openclaw/credentials/discord-default-allowFrom.json"
+            s3_bucket = os.environ.get("S3_BUCKET", "openclaw-tenants-263168716248")
+            s3_key = "_shared/openclaw-creds/discord-default-allowFrom.json"
+            if os.path.isfile(creds_src):
+                import subprocess as _sp2
+                _sp2.run(
+                    ["aws", "s3", "cp", creds_src,
+                     f"s3://{s3_bucket}/{s3_key}", "--quiet",
+                     "--region", os.environ.get("AWS_REGION", "us-east-1")],
+                    timeout=10, capture_output=True
+                )
+        except Exception as _e:
+            print(f"[pairing] S3 credentials sync failed (non-fatal): {_e}")
+
+    # 4. Audit trail
     db.create_audit_entry({
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "eventType": "config_change",
@@ -1784,12 +1911,8 @@ def get_session_detail(session_id: str):
             msg["toolCall"] = {"tool": r["toolName"], "status": r.get("toolStatus", "success"), "duration": r.get("toolDuration", "")}
         conv.append(msg)
 
-    # If no conversation in DB, create a minimal one from session data
-    if not conv:
-        conv = [
-            {"role": "user", "content": session.get("lastMessage", "Hello"), "ts": ""},
-            {"role": "assistant", "content": "I'm working on that request.", "ts": ""},
-        ]
+    # No conversation fallback — return empty list so frontend shows proper empty state
+    # (Real conversation persistence requires a message storage integration)
 
     # Quality metrics derived from session data
     turns = session.get("turns", 1)
@@ -1971,83 +2094,160 @@ def get_audit_entries(limit: int = 50, eventType: Optional[str] = None, authoriz
     return entries
 
 
-@app.get("/api/v1/audit/insights")
-def get_audit_insights():
-    """AI-generated security insights from audit log + memory file analysis.
-    In production: Admin OpenClaw on Gateway scans memory files, audit patterns,
-    and session data periodically to generate these insights."""
-    entries = db.get_audit_entries(limit=50)
-    blocked = [e for e in entries if e.get("status") == "blocked"]
+def _run_audit_scan() -> dict:
+    """Generate real insights from live DynamoDB + S3 data.
+    Pattern-based (no LLM). LLM memory analysis is a separate endpoint."""
+    from datetime import datetime, timezone, timedelta
+    import re
+
+    now = datetime.now(timezone.utc)
+    now_str = now.isoformat()
+    entries = db.get_audit_entries(limit=200)
     agents = db.get_agents()
     employees = db.get_employees()
+    sessions = db.get_sessions()
+    insights = []
+    idx = 0
 
-    insights = [
-        {
-            "id": "ins-001", "severity": "high", "category": "access_pattern",
-            "title": "Repeated shell access attempts from Intern role",
-            "description": f"Detected {len([e for e in blocked if 'shell' in e.get('detail','').lower()])} blocked shell access attempts from intern-role employees in the last 24 hours. Pattern suggests employees may need limited shell access for onboarding tasks.",
-            "recommendation": "Consider creating a sandboxed shell skill with read-only access for the Intern position, or add a guided approval workflow.",
-            "affectedUsers": ["Zhou Xiaoming", "Ma Tianyu"],
-            "detectedAt": "2026-03-20T10:35:00Z",
-            "source": "audit_log_scan",
-        },
-        {
-            "id": "ins-002", "severity": "medium", "category": "data_exposure",
-            "title": "Finance Agent sharing cost data via unsecured channel",
-            "description": "Carol Zhang's Finance Agent shared Q2 budget variance data via Slack (public channel). While within policy, the data contains department-level financial projections that should be restricted to #finance-private.",
-            "recommendation": "Add a channel restriction rule: Finance data → only #finance-private Slack channel or encrypted DM.",
-            "affectedUsers": ["Carol Zhang"],
-            "detectedAt": "2026-03-20T10:25:00Z",
-            "source": "memory_scan",
-        },
-        {
-            "id": "ins-003", "severity": "low", "category": "behavior_anomaly",
-            "title": "Unusual after-hours usage spike from DevOps Agent",
-            "description": "Sun Hao's DevOps Agent had 72 messages this week, 40% of which occurred between 11PM-3AM. This is 3x the normal after-hours pattern. Could indicate automated scripts or account sharing.",
-            "recommendation": "Review Sun Hao's recent session logs. Consider adding after-hours usage alerts for DevOps role.",
-            "affectedUsers": ["Sun Hao"],
-            "detectedAt": "2026-03-20T09:00:00Z",
-            "source": "usage_pattern_analysis",
-        },
-        {
-            "id": "ins-004", "severity": "medium", "category": "memory_risk",
-            "title": "PII detected in 2 employee memory files",
-            "description": "Periodic memory scan found potential PII (phone numbers, email addresses) stored in MEMORY.md for Mike Johnson and Emma Chen. Memory files should not contain customer PII per data policy.",
-            "recommendation": "Enable automatic PII redaction for memory file writes. Notify affected employees to review and clean their memory files.",
-            "affectedUsers": ["Mike Johnson", "Emma Chen"],
-            "detectedAt": "2026-03-20T08:30:00Z",
-            "source": "memory_scan",
-        },
-        {
-            "id": "ins-005", "severity": "high", "category": "compliance",
-            "title": "SOUL template drift detected in 3 agents",
-            "description": "Position-level SOUL template for SA was updated 2 days ago, but 3 SA agents (Zhang San, Li Si, Chen Wei) are still running the previous version. This means policy changes are not propagated.",
-            "recommendation": "Trigger workspace reassembly for affected agents. Consider adding automatic SOUL version sync on next cold start.",
-            "affectedUsers": ["Zhang San", "Li Si", "Chen Wei"],
-            "detectedAt": "2026-03-20T07:00:00Z",
+    # 1. Repeated permission denials — real data from audit log
+    blocked = [e for e in entries if e.get("status") == "blocked"]
+    if blocked:
+        # Group by actor
+        by_actor: dict = {}
+        for e in blocked:
+            actor = e.get("actorName", "unknown")
+            by_actor[actor] = by_actor.get(actor, [])
+            by_actor[actor].append(e)
+        # Flag actors with 3+ blocked attempts
+        repeat_blockers = {k: v for k, v in by_actor.items() if len(v) >= 2}
+        if repeat_blockers:
+            actor_names = list(repeat_blockers.keys())[:3]
+            total = sum(len(v) for v in repeat_blockers.values())
+            top_tool = ""
+            for e in blocked:
+                m = re.search(r'(shell|browser|code_execution|file_write)', e.get("detail", ""), re.I)
+                if m:
+                    top_tool = m.group(1)
+                    break
+            insights.append({
+                "id": f"ins-{idx:03d}", "severity": "high", "category": "access_pattern",
+                "title": f"{total} permission denials — {len(repeat_blockers)} repeat offenders",
+                "description": f"Detected {total} blocked operations across {len(repeat_blockers)} employees in the last 50 audit events. Top blocked tool: {top_tool or 'various'}. Repeated denials may indicate misconfigured SOUL permissions or employee confusion about allowed tools.",
+                "recommendation": "Review SOUL tool permissions for affected positions. Consider adding a permission escalation request workflow so employees can request access instead of being silently blocked.",
+                "affectedUsers": actor_names,
+                "detectedAt": now_str,
+                "source": "audit_log_scan",
+            })
+            idx += 1
+
+    # 2. SOUL version drift — agents where soulVersions.position < latest
+    pos_versions: dict = {}
+    for a in agents:
+        pos = a.get("positionId", "")
+        sv = (a.get("soulVersions") or {}).get("position", 1)
+        if pos not in pos_versions or sv > pos_versions[pos]:
+            pos_versions[pos] = sv
+    drifted = []
+    for a in agents:
+        pos = a.get("positionId", "")
+        sv = (a.get("soulVersions") or {}).get("position", 1)
+        if pos in pos_versions and sv < pos_versions[pos]:
+            emp = next((e for e in employees if e.get("id") == a.get("employeeId")), {})
+            drifted.append(emp.get("name", a.get("employeeName", a["id"])))
+    if drifted:
+        insights.append({
+            "id": f"ins-{idx:03d}", "severity": "high", "category": "compliance",
+            "title": f"SOUL version drift — {len(drifted)} agent(s) behind",
+            "description": f"{len(drifted)} agent(s) are running outdated position SOUL templates. Policy changes made to position SOULs have not been propagated to these agents, meaning security and behavior rules may not be current.",
+            "recommendation": "Trigger workspace reassembly for affected agents via Agent Factory → SOUL Editor. Consider auto-incrementing position SOUL version on each workspace assembly.",
+            "affectedUsers": drifted[:5],
+            "detectedAt": now_str,
             "source": "version_drift_check",
-        },
-        {
-            "id": "ins-006", "severity": "low", "category": "optimization",
-            "title": "Alex Rivera's agent has low engagement (8 messages/week)",
-            "description": "PM Agent for Alex Rivera shows significantly lower usage than peer PM agents (Lin Xiaoyu: 44/week). Agent may need onboarding support or skill adjustment.",
-            "recommendation": "Send Alex a guided onboarding message. Review if PM Agent skills match Alex's actual workflow.",
-            "affectedUsers": ["Alex Rivera"],
-            "detectedAt": "2026-03-20T06:00:00Z",
-            "source": "engagement_analysis",
-        },
-    ]
+        })
+        idx += 1
 
-    summary = {
-        "totalInsights": len(insights),
-        "high": len([i for i in insights if i["severity"] == "high"]),
-        "medium": len([i for i in insights if i["severity"] == "medium"]),
-        "low": len([i for i in insights if i["severity"] == "low"]),
-        "lastScanAt": "2026-03-20T10:35:00Z",
-        "scanSources": ["audit_log", "memory_files", "usage_patterns", "version_drift"],
+    # 3. Zero-turn agents — agents with no sessions at all
+    agents_with_sessions = {s.get("agentId") for s in sessions}
+    unengaged = [a for a in agents if a.get("id") not in agents_with_sessions and a.get("employeeId")]
+    if unengaged:
+        names = [next((e.get("name", "") for e in employees if e.get("id") == a.get("employeeId")), a.get("employeeName", "")) for a in unengaged[:3]]
+        names = [n for n in names if n]
+        if names:
+            insights.append({
+                "id": f"ins-{idx:03d}", "severity": "low", "category": "optimization",
+                "title": f"{len(unengaged)} employee agent(s) with no recorded sessions",
+                "description": f"{len(unengaged)} personal agents have never recorded a session. These employees may not be aware of their agent, or onboarding hasn't been completed. Low engagement reduces ROI.",
+                "recommendation": "Send an onboarding nudge to affected employees. Verify IM channel bindings are configured. Check if pairing was completed in Bindings → IM User Mappings.",
+                "affectedUsers": names,
+                "detectedAt": now_str,
+                "source": "engagement_analysis",
+            })
+            idx += 1
+
+    # 4. Config changes spike — if many config changes in audit log
+    config_changes = [e for e in entries if e.get("eventType") == "config_change"]
+    if len(config_changes) >= 5:
+        changers = list({e.get("actorName", "") for e in config_changes})[:3]
+        insights.append({
+            "id": f"ins-{idx:03d}", "severity": "medium", "category": "compliance",
+            "title": f"{len(config_changes)} configuration changes detected",
+            "description": f"{len(config_changes)} config change events recorded in recent audit log. High change velocity can introduce policy inconsistencies or unintended agent behavior changes.",
+            "recommendation": "Review recent config changes in Audit Center → Event Timeline filtered by 'Config Change'. Enable change approval workflow for SOUL and permission edits.",
+            "affectedUsers": changers,
+            "detectedAt": now_str,
+            "source": "audit_log_scan",
+        })
+        idx += 1
+
+    # 5. Agents missing bindings — created but no channel binding
+    bound_agent_ids = {b.get("agentId") for b in (db.get_bindings() if hasattr(db, "get_bindings") else [])}
+    unbound_agents = [a for a in agents if a.get("employeeId") and a.get("id") not in bound_agent_ids]
+    if unbound_agents:
+        names_ub = [a.get("employeeName", a.get("id", "")) for a in unbound_agents[:3]]
+        insights.append({
+            "id": f"ins-{idx:03d}", "severity": "medium", "category": "optimization",
+            "title": f"{len(unbound_agents)} agent(s) without IM channel binding",
+            "description": f"{len(unbound_agents)} personal agents exist in the system but have no IM channel binding. These agents cannot receive messages from employees via Discord, Slack, or other channels.",
+            "recommendation": "Go to Bindings & Routing → Create Binding to link these agents to the appropriate IM channel. Or use Bulk Assign by Position.",
+            "affectedUsers": names_ub,
+            "detectedAt": now_str,
+            "source": "binding_scan",
+        })
+        idx += 1
+
+    return {
+        "insights": insights,
+        "summary": {
+            "totalInsights": len(insights),
+            "high": len([i for i in insights if i["severity"] == "high"]),
+            "medium": len([i for i in insights if i["severity"] == "medium"]),
+            "low": len([i for i in insights if i["severity"] == "low"]),
+            "lastScanAt": now_str,
+            "scanSources": ["audit_log", "agent_soul_versions", "session_data", "binding_registry"],
+        }
     }
 
-    return {"insights": insights, "summary": summary}
+
+# Cache last scan result in memory (reset on server restart)
+_audit_scan_cache: dict = {}
+
+
+@app.get("/api/v1/audit/insights")
+def get_audit_insights():
+    """Return cached scan results (or empty if never scanned)."""
+    global _audit_scan_cache
+    if not _audit_scan_cache:
+        # Run once on first load
+        _audit_scan_cache = _run_audit_scan()
+    return _audit_scan_cache
+
+
+@app.post("/api/v1/audit/run-scan")
+def run_audit_scan():
+    """Trigger a fresh audit scan. Returns updated insights."""
+    global _audit_scan_cache
+    _audit_scan_cache = _run_audit_scan()
+    return _audit_scan_cache
 
 
 @app.get("/api/v1/monitor/health")

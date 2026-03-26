@@ -148,9 +148,9 @@ echo "[entrypoint] server.py PID=${SERVER_PID}"
             aws s3 sync "$WORKSPACE/" "$SYNC_TARGET" \
                 --exclude "node_modules/*" --exclude "skills/_shared/*" --exclude "skills/*" \
                 --exclude "SOUL.md" --exclude "AGENTS.md" --exclude "TOOLS.md" --exclude "IDENTITY.md" \
-                --exclude "MEMORY.md" --exclude "USER.md" \
                 --exclude ".personal_soul_backup.md" --exclude "knowledge/*" \
-                --region us-east-2 \
+                --size-only \
+                --region us-east-1 \
                 --quiet 2>/dev/null && echo "[watchdog] Synced to ${SYNC_TARGET}" || true
         fi
         
@@ -181,9 +181,9 @@ cleanup() {
         aws s3 sync "$WORKSPACE/" "s3://${S3_BUCKET}/${FINAL_BASE}/workspace/" \
             --exclude "node_modules/*" --exclude "skills/_shared/*" --exclude "skills/*" \
             --exclude "SOUL.md" --exclude "AGENTS.md" --exclude "TOOLS.md" --exclude "IDENTITY.md" \
-            --exclude "MEMORY.md" --exclude "USER.md" \
             --exclude ".personal_soul_backup.md" --exclude "knowledge/*" \
-            --region us-east-2 \
+            --size-only \
+            --region us-east-1 \
             --quiet 2>/dev/null || true
         echo "[entrypoint] Workspace flushed to s3://${S3_BUCKET}/${FINAL_BASE}/workspace/"
     fi

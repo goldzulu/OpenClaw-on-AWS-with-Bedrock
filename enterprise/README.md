@@ -191,7 +191,7 @@ The merged SOUL.md is what the agent reads. An SA agent and a Finance agent use 
 
 **Path A** is for all employee agents — messages go through the Gateway → H2 Proxy → Tenant Router → AgentCore microVM pipeline. Each employee gets an isolated Firecracker microVM with their personalized SOUL, skills, and memory.
 
-**Path B** is for the IT Admin Assistant only — runs directly on the EC2 instance via subprocess, bypasses H2 Proxy entirely, calls Bedrock directly. Has read-only access to the EC2 filesystem, services, and logs. Identity is injected via message prefix (OpenClaw's bootstrap overwrites SOUL.md files).
+**Path B** is for the IT Admin Assistant only — triggered when `userId === 'admin'` (set by the Admin Console chat bubble). The H2 Proxy detects this and proxies directly to real Bedrock, bypassing Tenant Router. **Important:** PATH B detection must use `userId === 'admin'` only — do NOT check for keywords in the system prompt (e.g. SOUL.md content), as the gateway SOUL is shared across all sessions and would incorrectly route all employees through PATH B.
 
 ## Gateway Architecture: One Bot, All Employees
 
@@ -227,11 +227,16 @@ Step 2: Employee DMs the company Bot for the first time
         Bot replies: "Pairing code: KFDAF3GN"
 
 Step 3: IT Admin opens Admin Console → Bindings → IM User Mappings
-        Clicks "Add Mapping":
-          Channel: Discord
+        Clicks "Approve Pairing":
+          Pairing Code: KFDAF3GN (from pairing message)
           Platform User ID: 1460888812426363004 (from pairing message)
           Employee: Carol Zhang (Finance Analyst)
-        → System writes SSM mapping + approves pairing
+        → System approves pairing (updates gateway in-memory state instantly)
+        → Writes SSM mappings for ALL userId formats the H2 Proxy may extract:
+            /user-mapping/1460888812426363004  → emp-carol  (numeric Discord ID)
+            /user-mapping/dm_carol            → emp-carol  (Discord DM username)
+            /user-mapping/carol               → emp-carol  (plain username)
+        → Writes SSM position + permissions for Carol's role
 
 Step 4: Employee sends another message
         → Gateway allows it (pairing approved)
@@ -255,7 +260,7 @@ For employees who don't use IM tools, the Web Portal provides the same experienc
 | **SOUL Injection** | 3-layer merge (Global + Position + Personal) → OpenClaw reads merged SOUL.md at session start |
 | **Permission Control** | SOUL.md defines allowed/blocked tools per role. Plan A (pre-execution) + Plan E (post-audit) |
 | **Skill Filtering** | 26 skills with `allowedRoles`/`blockedRoles` in manifest. Finance gets excel-gen, SDE gets github-pr |
-| **Memory Persistence** | Watchdog syncs workspace to S3 every 60s. Next session loads previous memory |
+| **Memory Persistence** | After each invocation, `server.py` appends the conversation turn to `MEMORY.md`. Watchdog syncs workspace to S3 every 60s (with `--update` to prevent zombie microVMs from overwriting). Next session loads MEMORY.md from S3. |
 | **Real-time Usage** | Every invocation writes tokens/cost to DynamoDB. Admin Console shows per-agent breakdown |
 | **Manager Scoping** | API-level filtering — managers see only their department's data (BFS sub-department rollup) |
 | **Employee Portal** | Browser-based chat with bound agent. No IM tool dependency |
@@ -536,6 +541,51 @@ enterprise/
     ├── README.md                          # Demo guide with scenarios
     └── images/                            # Screenshots for README
 ```
+
+## Operational Notes
+
+### H2 Proxy and Tenant Router — systemd Services
+
+The H2 Proxy (`bedrock_proxy_h2.js`) and Tenant Router (`tenant_router.py`) must be managed by systemd to preserve environment variables across restarts. Without systemd, a manual restart loses `STACK_NAME`, `AGENTCORE_RUNTIME_ID`, and other env vars, breaking all routing silently.
+
+Service files are in `gateway/bedrock-proxy-h2.service` and `gateway/tenant-router.service`. Install with:
+
+```bash
+# Create env file with secrets (never commit this)
+sudo mkdir -p /etc/openclaw
+sudo tee /etc/openclaw/env << EOF
+STACK_NAME=openclaw-multitenancy
+AGENTCORE_RUNTIME_ID=openclaw_multitenancy_runtime-<YOUR_RUNTIME_ID>
+AWS_REGION=us-east-1
+BEDROCK_MODEL_ID=global.amazon.nova-2-lite-v1:0
+EOF
+
+sudo cp gateway/bedrock-proxy-h2.service /etc/systemd/system/
+sudo cp gateway/tenant-router.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable bedrock-proxy-h2 tenant-router
+sudo systemctl start bedrock-proxy-h2 tenant-router
+```
+
+### Cold-Start First Message Behavior
+
+When a tenant's microVM is cold (first message after idle > 20 min), the H2 Proxy:
+1. Fires a background prewarm to AgentCore (async)
+2. Returns a fast-path Bedrock response (~2-3s) without employee SOUL/memory
+3. **The second message** (after prewarm completes, ~15-20s) gets the full personalized response
+
+This is expected behavior. The warming timeout is 25s (tuned to AgentCore cold-start time). The first message will always be generic — this is the latency/UX tradeoff of serverless microVMs.
+
+### Discord Pairing File Permissions
+
+The files `/home/ubuntu/.openclaw/credentials/discord-default-allowFrom.json` and `discord-pairing.json` must be owned by `ubuntu` (not `root`). The openclaw-gateway runs as ubuntu and cannot read root-owned files. If permissions break:
+
+```bash
+chown ubuntu:ubuntu /home/ubuntu/.openclaw/credentials/discord-*.json
+sudo systemctl restart openclaw-gateway
+```
+
+Always use the Admin Console "Approve Pairing" button — never run `openclaw pairing approve` as root directly.
 
 ## Cost Estimate
 

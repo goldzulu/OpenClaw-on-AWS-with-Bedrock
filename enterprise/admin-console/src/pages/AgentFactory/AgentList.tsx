@@ -17,14 +17,17 @@ export default function AgentList() {
   const [newName, setNewName] = useState('');
   const [newPos, setNewPos] = useState('');
   const [newEmp, setNewEmp] = useState('');
-  const [newChannels, setNewChannels] = useState<string[]>(['slack']);
+  const [newChannels, setNewChannels] = useState<string[]>(['discord']);
   const [filterText, setFilterText] = useState('');
   const [filterDept, setFilterDept] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [activeTab, setActiveTab] = useState('personal');
 
   const posOptions = POSITIONS.map(p => ({ label: p.name, value: p.id }));
-  const empOptions = EMPLOYEES.filter(e => !e.agentId).map(e => ({ label: `${e.name} (${e.positionName})`, value: e.id }));
+  // Filter to unbound employees; if a position is selected, further filter by that position
+  const empOptions = EMPLOYEES
+    .filter(e => !e.agentId && (!newPos || e.positionId === newPos))
+    .map(e => ({ label: `${e.name} (${e.positionName})`, value: e.id }));
   const avgQuality = AGENTS.filter(a => a.qualityScore).reduce((s, a) => s + (a.qualityScore || 0), 0) / AGENTS.filter(a => a.qualityScore).length;
 
   const personalAgents = AGENTS.filter(a => a.employeeId !== null);
@@ -154,13 +157,16 @@ export default function AgentList() {
                   if (newName && newPos) {
                     const pos = POSITIONS.find(p => p.id === newPos);
                     const emp = EMPLOYEES.find(e => e.id === newEmp);
+                    const defaultCh = pos?.defaultChannel || 'discord';
                     createAgent.mutate({
+                      id: `agent-${newPos.replace('pos-', '')}-${newEmp.replace('emp-', '')}`,
                       name: newName,
                       employeeId: newEmp || null,
                       employeeName: emp?.name || '',
                       positionId: newPos,
                       positionName: pos?.name || '',
-                      channels: [],
+                      channels: [defaultCh],
+                      defaultChannel: defaultCh,
                       skills: pos?.defaultSkills || [],
                     } as any);
                   }
@@ -176,11 +182,9 @@ export default function AgentList() {
             <h4 className="text-sm font-medium text-text-primary">Step 1: Basic Configuration</h4>
             <Select label="Position Template" value={newPos} onChange={v => {
               setNewPos(v);
-              // Auto-generate name when position changes
+              setNewEmp(''); // reset employee when position changes
               const pos = POSITIONS.find(p => p.id === v);
-              const emp = EMPLOYEES.find(e => e.id === newEmp);
-              if (pos && emp) setNewName(`${pos.name} Agent - ${emp.name}`);
-              else if (pos) setNewName(`${pos.name} Agent`);
+              if (pos) setNewName(`${pos.name} Agent`);
             }} options={posOptions} placeholder="Select position" description="Inherits SOUL, Skills, and tool permissions" />
             <Select label="Bind Employee" value={newEmp} onChange={v => {
               setNewEmp(v);
@@ -223,7 +227,8 @@ export default function AgentList() {
               <div><p className="text-xs text-text-muted">Agent Name</p><p className="text-sm font-medium">{newName || '(not set)'}</p></div>
               <div><p className="text-xs text-text-muted">Position</p><p className="text-sm font-medium">{POSITIONS.find(p => p.id === newPos)?.name || '(not selected)'}</p></div>
               <div><p className="text-xs text-text-muted">Employee</p><p className="text-sm font-medium">{EMPLOYEES.find(e => e.id === newEmp)?.name || '(not selected)'}</p></div>
-              <div><p className="text-xs text-text-muted">Mode</p><p className="text-sm font-medium">From position template</p></div>
+              <div><p className="text-xs text-text-muted">Default Channel</p><p className="text-sm font-medium">{POSITIONS.find(p => p.id === newPos)?.defaultChannel || 'discord'}</p></div>
+              <div><p className="text-xs text-text-muted">Mode</p><p className="text-sm font-medium">1:1 Personal</p></div>
             </div>
           </div>
         )}

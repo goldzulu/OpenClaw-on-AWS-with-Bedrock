@@ -175,6 +175,22 @@ def _ensure_workspace_assembled(tenant_id: str) -> None:
             except Exception as e:
                 logger.warning("SSM user-mapping lookup failed: %s", e)
 
+        # 0. Load shared OpenClaw credentials (discord allowFrom list) into microVM
+        #    This is how the microVM knows which Discord users are approved.
+        #    The EC2 updates this file on every pairing approval and uploads to S3.
+        creds_dir = "/root/.openclaw/credentials"
+        os.makedirs(creds_dir, exist_ok=True)
+        try:
+            subprocess.run(
+                ["aws", "s3", "cp",
+                 f"s3://{S3_BUCKET}/_shared/openclaw-creds/discord-default-allowFrom.json",
+                 f"{creds_dir}/discord-default-allowFrom.json", "--quiet"],
+                capture_output=True, text=True, timeout=10
+            )
+            logger.info("Discord allowFrom credentials loaded into microVM")
+        except Exception as e:
+            logger.warning("Could not load discord credentials (non-fatal): %s", e)
+
         # 1. Sync tenant's personal workspace from S3 using BASE ID
         # IMPORTANT: Use 'cp --recursive' instead of 'sync' to force S3 → local overwrite.
         # The entrypoint.sh initial sync uses tenant=unknown, creating empty workspace files.
@@ -302,6 +318,52 @@ def _ensure_workspace_assembled(tenant_id: str) -> None:
 
         _assembled_tenants.add(tenant_id)
         logger.info("Workspace ready for tenant %s", tenant_id)
+
+
+def _append_memory_turn(base_id: str, user_msg: str, assistant_msg: str) -> None:
+    """Append a conversation turn to MEMORY.md for cross-session persistence.
+
+    Called after each successful invocation. The watchdog syncs MEMORY.md to S3
+    every 60s, so the next microVM loading this tenant's workspace will have history.
+    """
+    from datetime import datetime, timezone
+
+    memory_path = os.path.join(WORKSPACE, "MEMORY.md")
+    try:
+        now = datetime.now(timezone.utc)
+        date_str = now.strftime("%Y-%m-%d %H:%M UTC")
+
+        u = user_msg[:300] + ("..." if len(user_msg) > 300 else "")
+        a = assistant_msg[:600] + ("..." if len(assistant_msg) > 600 else "")
+        entry = f"\n## {date_str}\n**User:** {u}\n**Assistant:** {a}\n"
+
+        if os.path.isfile(memory_path):
+            with open(memory_path, "r") as f:
+                content = f.read()
+        else:
+            content = "# Memory\n"
+
+        if not content.strip().startswith("# Memory"):
+            content = "# Memory\n" + content
+
+        # Remove placeholder on first real write
+        content = content.replace("\nNo previous conversations recorded.\n", "\n")
+        content = content.replace("\nNo previous conversations recorded.", "\n")
+
+        new_content = content.rstrip() + "\n" + entry
+
+        # Cap at ~200 lines to prevent unbounded growth
+        lines = new_content.splitlines()
+        if len(lines) > 200:
+            lines = [lines[0]] + lines[-190:]
+            new_content = "\n".join(lines) + "\n"
+
+        with open(memory_path, "w") as f:
+            f.write(new_content)
+
+        logger.info("Memory appended for base=%s chars=%d", base_id, len(new_content))
+    except Exception as e:
+        logger.warning("Memory append failed (non-fatal): %s", e)
 
 
 def _build_system_prompt(tenant_id: str) -> str:
@@ -580,6 +642,10 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
                         base_id = resolved
             except Exception:
                 pass
+
+            # Persist conversation turn to MEMORY.md (watchdog syncs to S3 every 60s)
+            _append_memory_turn(base_id, message, response_text)
+
             threading.Thread(
                 target=_write_usage_to_dynamodb,
                 args=(tenant_id, base_id, usage, model, duration_ms),

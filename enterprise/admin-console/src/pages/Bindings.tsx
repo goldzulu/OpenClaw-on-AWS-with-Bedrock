@@ -27,6 +27,7 @@ export default function Bindings() {
   const [pairChannel, setPairChannel] = useState('discord');
   const [pairCode, setPairCode] = useState('');
   const [pairUserId, setPairUserId] = useState('');
+  const [pairUsername, setPairUsername] = useState('');
   const [pairEmpId, setPairEmpId] = useState('');
   const [pairResult, setPairResult] = useState<string | null>(null);
   const [bulkPos, setBulkPos] = useState('');
@@ -328,7 +329,7 @@ export default function Bindings() {
 
       {/* Pairing Approve Modal */}
       <Modal
-        open={showPairing} onClose={() => { setShowPairing(false); setPairCode(''); setPairUserId(''); setPairEmpId(''); setPairResult(null); }}
+        open={showPairing} onClose={() => { setShowPairing(false); setPairCode(''); setPairUserId(''); setPairUsername(''); setPairEmpId(''); setPairResult(null); }}
         title="Approve IM Pairing"
         footer={<div className="flex justify-end gap-3">
           <Button variant="default" onClick={() => { setShowPairing(false); setPairResult(null); }}>
@@ -336,7 +337,7 @@ export default function Bindings() {
           </Button>
           {!pairResult && (
             <Button variant="primary" disabled={!pairCode || !pairEmpId || approvePairing.isPending} onClick={() => {
-              approvePairing.mutate({ channel: pairChannel, pairingCode: pairCode, employeeId: pairEmpId, channelUserId: pairUserId }, {
+              approvePairing.mutate({ channel: pairChannel, pairingCode: pairCode, employeeId: pairEmpId, channelUserId: pairUserId, pairingUserId: pairUsername }, {
                 onSuccess: (data) => {
                   if (data.approved) {
                     setPairResult(`✅ Approved! ${data.output || ''} ${data.mappingWritten ? '+ SSM mapping written' : ''}`);
@@ -371,11 +372,18 @@ export default function Bindings() {
                 className="w-full rounded-lg border border-dark-border bg-dark-bg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-primary focus:outline-none font-mono tracking-wider" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1">Platform User ID (from pairing message)</label>
+              <label className="block text-xs font-medium text-text-secondary mb-1">Platform User ID (numeric, from pairing message)</label>
               <input value={pairUserId} onChange={e => setPairUserId(e.target.value)}
                 placeholder="e.g. 1460888812426363004"
                 className="w-full rounded-lg border border-dark-border bg-dark-bg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-primary focus:outline-none font-mono" />
-              <p className="text-xs text-text-muted mt-1">The "Your user id" shown in the pairing message. Used to map this IM account to the employee.</p>
+              <p className="text-xs text-text-muted mt-1">The numeric "Your user id" from the pairing message.</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">Username / Handle (optional)</label>
+              <input value={pairUsername} onChange={e => setPairUsername(e.target.value)}
+                placeholder="e.g. wujiade4444"
+                className="w-full rounded-lg border border-dark-border bg-dark-bg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-primary focus:outline-none font-mono" />
+              <p className="text-xs text-text-muted mt-1">Discord username shown in pairing message meta. Creates additional SSM mappings for reliable routing.</p>
             </div>
             <Select label="Employee" value={pairEmpId} onChange={setPairEmpId}
               options={EMPLOYEES.map(e => ({ label: `${e.name} (${e.positionName})`, value: e.id }))}
