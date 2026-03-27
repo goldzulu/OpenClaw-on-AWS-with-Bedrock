@@ -832,7 +832,8 @@ def create_binding(body: dict):
 import boto3 as _boto3_main
 
 def _ssm_client():
-    return _boto3_main.client("ssm", region_name=os.environ.get("SSM_REGION", os.environ.get("AWS_REGION", "us-east-1")))
+    # User-mapping params are always in us-east-1 regardless of admin console AWS_REGION
+    return _boto3_main.client("ssm", region_name=os.environ.get("SSM_REGION", "us-east-1"))
 
 def _mapping_prefix():
     stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
@@ -863,7 +864,7 @@ def _list_user_mappings() -> list:
     try:
         ssm = _ssm_client()
         mappings = []
-        params = {"Path": prefix, "Recursive": True, "MaxResults": 50}
+        params = {"Path": prefix, "Recursive": True, "MaxResults": 10}
         while True:
             resp = ssm.get_parameters_by_path(**params)
             for p in resp.get("Parameters", []):
@@ -1981,7 +1982,7 @@ def _find_channel_user_id(emp_id: str, channel_prefix: str) -> str:
         import boto3 as _b3_rev
         prefix = _mapping_prefix()
         ssm = _b3_rev.client("ssm", region_name="us-east-1")
-        resp = ssm.get_parameters_by_path(Path=prefix, Recursive=True, MaxResults=100)
+        resp = ssm.get_parameters_by_path(Path=prefix, Recursive=True, MaxResults=10)
         for p in resp.get("Parameters", []):
             if p.get("Value") == emp_id:
                 name = p["Name"].replace(prefix, "")
@@ -2060,7 +2061,7 @@ def _list_user_mappings_for_employee(emp_id: str, channel_prefix: str) -> bool:
         import boto3 as _b3_chk
         prefix = _mapping_prefix()
         ssm = _b3_chk.client("ssm", region_name="us-east-1")
-        resp = ssm.get_parameters_by_path(Path=prefix, Recursive=True, MaxResults=50)
+        resp = ssm.get_parameters_by_path(Path=prefix, Recursive=True, MaxResults=10)
         for p in resp.get("Parameters", []):
             if p.get("Value") == emp_id and channel_prefix in p.get("Name", ""):
                 return True
@@ -3322,77 +3323,63 @@ def _run_openclaw_channels() -> list:
 
 @app.get("/api/v1/admin/im-channel-connections")
 def get_im_channel_connections(authorization: str = Header(default="")):
-    """Per-channel employee connection table for admin management.
-    Returns all connected employees grouped by IM channel, with
-    session counts, first connected time, and last active timestamp."""
+    """Per-channel employee connection table for admin management."""
     _require_role(authorization, roles=["admin"])
-    import boto3 as _b3icc
-    ssm = _b3icc.client("ssm", region_name="us-east-1")
-    prefix = _mapping_prefix()
-
-    # 1. Read all SSM user-mapping params (include LastModifiedDate for "connected since")
-    raw_params = []
     try:
-        paginator = ssm.get_paginator("get_parameters_by_path")
-        for page in paginator.paginate(Path=prefix, Recursive=True):
-            raw_params.extend(page.get("Parameters", []))
+        # 1. Get all SSM user-mapping params
+        raw_mappings = _list_user_mappings()
+        print(f"[im-connections] _list_user_mappings returned {len(raw_mappings)} entries")
+
+        # 2. Employee lookup
+        emps = db.get_employees()
+        emp_map = {e["id"]: e for e in emps}
+        print(f"[im-connections] {len(emps)} employees loaded")
+
+        # 3. Session counts from audit log (lightweight: limit 500)
+        session_counts: dict = {}
+        last_active: dict = {}
+        try:
+            audit = db.get_audit_entries(limit=500)
+            for a in audit:
+                eid = a.get("actorId", "")
+                if eid and a.get("eventType") == "agent_invocation":
+                    session_counts[eid] = session_counts.get(eid, 0) + 1
+                    ts = a.get("timestamp", "")
+                    if ts > last_active.get(eid, ""):
+                        last_active[eid] = ts
+        except Exception as ae:
+            print(f"[im-connections] audit fetch failed (non-fatal): {ae}")
+
+        # 4. Group by channel — skip unknown/unkn prefixes
+        by_channel: dict = {}
+        for m in raw_mappings:
+            channel = m.get("channel", "")
+            if channel in ("unknown", "unkn") or not channel:
+                continue
+            emp_id = m.get("employeeId", "")
+            emp = emp_map.get(emp_id)
+            if not emp:
+                continue
+            channel_user_id = m.get("channelUserId", "")
+            by_channel.setdefault(channel, []).append({
+                "empId": emp_id,
+                "empName": emp.get("name", emp_id),
+                "positionName": emp.get("positionName", ""),
+                "departmentName": emp.get("departmentName", ""),
+                "channelUserId": channel_user_id,
+                "connectedAt": m.get("lastModified", ""),
+                "sessionCount": session_counts.get(emp_id, 0),
+                "lastActive": last_active.get(emp_id, ""),
+            })
+
+        print(f"[im-connections] result channels: {list(by_channel.keys())}, total: {sum(len(v) for v in by_channel.values())}")
+        return {"connections": by_channel}
+
     except Exception as e:
-        print(f"[im-connections] SSM scan failed: {e}")
-
-    # 2. Employee lookup
-    emps = db.get_employees()
-    emp_map = {e["id"]: e for e in emps}
-
-    # 3. Session counts + last active from audit log
-    audit = db.get_audit_entries(limit=2000)
-    session_counts: dict = {}
-    last_active: dict = {}
-    for a in audit:
-        eid = a.get("actorId", "")
-        if not eid:
-            continue
-        if a.get("eventType") == "agent_invocation":
-            session_counts[eid] = session_counts.get(eid, 0) + 1
-            ts = a.get("timestamp", "")
-            if ts > last_active.get(eid, ""):
-                last_active[eid] = ts
-
-    # 4. Group by channel — only mappings with channel__ prefix
-    by_channel: dict = {}
-    for p in raw_params:
-        name = p["Name"].replace(prefix, "")
-        parts = name.split("__", 1)
-        if len(parts) != 2:
-            continue
-        channel, channel_user_id = parts
-        if channel in ("unknown", "unkn") or not channel_user_id:
-            continue
-
-        emp_id = p.get("Value", "")
-        emp = emp_map.get(emp_id)
-        if not emp:
-            # Try resolving via alternate ID formats
-            emp = next((e for e in emps if e.get("employeeNo") == emp_id), None)
-        if not emp:
-            continue
-
-        last_modified = p.get("LastModifiedDate")
-        connected_at = last_modified.isoformat() if hasattr(last_modified, "isoformat") else str(last_modified or "")
-
-        if channel not in by_channel:
-            by_channel[channel] = []
-        by_channel[channel].append({
-            "empId": emp_id,
-            "empName": emp.get("name", emp_id),
-            "positionName": emp.get("positionName", ""),
-            "departmentName": emp.get("departmentName", ""),
-            "channelUserId": channel_user_id,
-            "connectedAt": connected_at,
-            "sessionCount": session_counts.get(emp_id, 0),
-            "lastActive": last_active.get(emp_id, ""),
-        })
-
-    return {"connections": by_channel}
+        print(f"[im-connections] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"connections": {}, "error": str(e)}
 
 
 @app.get("/api/v1/admin/im-channels")
@@ -3406,7 +3393,7 @@ def get_im_channels(authorization: str = Header(default="")):
     channel_counts: dict = {}
     try:
         prefix = _mapping_prefix()
-        resp = ssm.get_parameters_by_path(Path=prefix, Recursive=True, MaxResults=100)
+        resp = ssm.get_parameters_by_path(Path=prefix, Recursive=True, MaxResults=10)
         for p in resp.get("Parameters", []):
             name = p["Name"].replace(prefix, "")
             for ch in ["telegram", "discord", "slack", "whatsapp", "feishu", "teams"]:
