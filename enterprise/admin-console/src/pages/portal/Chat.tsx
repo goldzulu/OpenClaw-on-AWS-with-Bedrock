@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Bot, User, Loader2, Trash2 } from 'lucide-react';
+import { Send, Bot, User, Loader2, Trash2, Zap } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../api/client';
@@ -25,6 +25,38 @@ function loadMessages(userId: string): Message[] {
 
 function saveMessages(userId: string, messages: Message[]) {
   localStorage.setItem(`${STORAGE_KEY}_${userId}`, JSON.stringify(messages));
+}
+
+// Shows a progress bar with countdown during agent cold-start
+function WarmupIndicator() {
+  const [elapsed, setElapsed] = useState(0);
+  const total = 28; // typical cold start seconds
+  useEffect(() => {
+    const t = setInterval(() => setElapsed(e => Math.min(e + 1, total)), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const pct = Math.round((elapsed / total) * 100);
+  const isWarm = elapsed < 3;
+  return (
+    <div className="rounded-xl bg-dark-card border border-dark-border px-4 py-3 w-64 space-y-2">
+      {isWarm ? (
+        <div className="flex items-center gap-2 text-xs text-text-muted">
+          <Loader2 size={13} className="animate-spin" /> Thinking...
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between text-xs">
+            <span className="flex items-center gap-1 text-warning"><Zap size={12} /> Agent starting up</span>
+            <span className="text-text-muted">~{Math.max(0, total - elapsed)}s</span>
+          </div>
+          <div className="h-1 w-full rounded-full bg-dark-border overflow-hidden">
+            <div className="h-full rounded-full bg-warning transition-[width] duration-1000" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="text-[10px] text-text-muted">First message takes ~25s — subsequent responses are instant</p>
+        </>
+      )}
+    </div>
+  );
 }
 
 export default function PortalChat() {
@@ -103,8 +135,8 @@ export default function PortalChat() {
             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
             <span className="text-xs text-green-400">Online</span>
           </div>
-          <button onClick={clearChat} className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors" title="Clear chat history">
-            <Trash2 size={14} /> Clear
+          <button onClick={clearChat} className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors" title="Clear display only — agent memory is preserved">
+            <Trash2 size={14} /> Clear display
           </button>
         </div>
       </div>
@@ -148,12 +180,8 @@ export default function PortalChat() {
         ))}
         {sending && (
           <div className="flex gap-3">
-            <div className="shrink-0 mt-1">
-              <ClawForgeLogo size={28} animate="working" />
-            </div>
-            <div className="rounded-xl bg-dark-card border border-dark-border px-4 py-3 flex items-center gap-2">
-              <span className="text-xs text-text-muted">Thinking...</span>
-            </div>
+            <div className="shrink-0 mt-1"><ClawForgeLogo size={28} animate="working" /></div>
+            <WarmupIndicator />
           </div>
         )}
         <div ref={bottomRef} />

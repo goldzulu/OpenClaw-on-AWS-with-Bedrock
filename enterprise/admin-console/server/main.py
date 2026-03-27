@@ -1788,12 +1788,16 @@ def portal_profile(authorization: str = Header(default="")):
     memory_md = s3ops.read_file(f"{user.employee_id}/workspace/MEMORY.md") or ""
     agent = db.get_agent(emp.get("agentId", ""))
 
+    # Return first 2KB of MEMORY.md so portal can show "what agent remembers"
+    memory_preview = memory_md[:2048] if memory_md else None
+
     return {
         "employee": emp,
         "agent": agent,
         "userMd": user_md,
         "memoryMdSize": len(memory_md),
         "dailyMemoryCount": len(s3ops.list_files(f"{user.employee_id}/workspace/memory/")),
+        "memoryPreview": memory_preview,
     }
 
 
@@ -1868,6 +1872,47 @@ def portal_requests(authorization: str = Header(default="")):
     my_pending = [a for a in all_approvals if a.get("tenantId", "").endswith(user.employee_id.replace("emp-", "")) and a.get("status") == "pending"]
     my_resolved = [a for a in all_approvals if a.get("tenantId", "").endswith(user.employee_id.replace("emp-", "")) and a.get("status") != "pending"]
     return {"pending": my_pending, "resolved": my_resolved}
+
+
+class PortalRequestCreate(BaseModel):
+    type: str  # "tool" or "skill"
+    resourceId: str
+    resourceName: str
+    reason: str = ""
+
+
+@app.post("/api/v1/portal/requests/create")
+def portal_request_create(body: PortalRequestCreate, authorization: str = Header(default="")):
+    """Employee self-service: create a tool/skill access request."""
+    user = _require_auth(authorization)
+    emp = db.get_employee(user.employee_id)
+    emp_name = emp.get("name", user.employee_id) if emp else user.employee_id
+
+    request_id = f"req-{user.employee_id}-{body.resourceId}-{int(time.time())}"
+    db.create_approval({
+        "id": request_id,
+        "type": "permission_request",
+        "status": "pending",
+        "tenantId": f"portal__{user.employee_id}",
+        "employeeId": user.employee_id,
+        "employeeName": emp_name,
+        "tool": body.resourceName,
+        "resource": body.resourceId,
+        "reason": body.reason or f"Employee requested access to: {body.resourceName}",
+        "requestedAt": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    db.create_audit_entry({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "eventType": "permission_request",
+        "actorId": user.employee_id,
+        "actorName": emp_name,
+        "targetType": body.type,
+        "targetId": body.resourceId,
+        "detail": f"Employee self-service request: {body.resourceName} — {body.reason}",
+        "status": "pending",
+    })
+    return {"created": True, "requestId": request_id}
 
 
 def _find_channel_user_id(emp_id: str, channel_prefix: str) -> str:

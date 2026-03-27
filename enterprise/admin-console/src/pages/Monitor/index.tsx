@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import Chart from 'react-apexcharts';
 import type { ApexOptions } from 'apexcharts';
 import { Bot, MessageSquare, Star, AlertTriangle, Shield, RefreshCw, Eye, Radio, Clock, Zap } from 'lucide-react';
@@ -26,11 +26,18 @@ export default function Monitor() {
   const { data: sessions = [], refetch: refetchSessions } = useSessions();
   const { data: AGENTS = [] } = useAgents();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { data: healthData, refetch: refetchHealth } = useMonitorHealth();
   const { data: alertRules = [], refetch: refetchAlerts } = useAlertRules();
   const { data: runtimeData } = useRuntimeEvents(60);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('sessions');
+
+  // Deep-link: ?session=<id> from Agent Detail → pre-select that session
+  useEffect(() => {
+    const sid = searchParams.get('session');
+    if (sid) setSelectedSession(sid);
+  }, [searchParams]);
 
   const health = healthData?.agents || [];
   const sys = healthData?.system || {};

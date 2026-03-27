@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import Chart from 'react-apexcharts';
 import type { ApexOptions } from 'apexcharts';
-import { DollarSign, TrendingUp, TrendingDown, Users, Bot, AlertTriangle, Download, Calendar } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Users, Bot, AlertTriangle, Download, Calendar, Info } from 'lucide-react';
 import { Card, StatCard, Badge, Button, PageHeader, Table, Tabs } from '../components/ui';
 import { useUsageSummary, useUsageByDepartment, useUsageByAgent, useUsageBudgets, useUsageTrend, useUsageByModel } from '../hooks/useApi';
 
@@ -11,7 +11,7 @@ const costTrendOpts: ApexOptions = {
   stroke: { curve: 'smooth', width: 2 },
   fill: { type: 'gradient', gradient: { opacityFrom: 0.3, opacityTo: 0.05 } },
   grid: { borderColor: '#2e3039', strokeDashArray: 4 },
-  xaxis: { categories: ['Mar 14', 'Mar 15', 'Mar 16', 'Mar 17', 'Mar 18', 'Mar 19', 'Mar 20'], labels: { style: { colors: '#64748b', fontSize: '12px' } }, axisBorder: { show: false }, axisTicks: { show: false } },
+  xaxis: { labels: { style: { colors: '#64748b', fontSize: '12px' } }, axisBorder: { show: false }, axisTicks: { show: false } },
   yaxis: { labels: { style: { colors: '#64748b', fontSize: '12px' }, formatter: (v: number) => `$${v.toFixed(2)}` } },
   tooltip: { theme: 'dark' },
   legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#94a3b8' } },
@@ -268,6 +268,12 @@ export default function Usage() {
 
           {activeTab === 'budget' && (
             <div>
+              <div className="rounded-xl bg-warning/10 border border-warning/30 px-4 py-3 mb-4 flex items-start gap-2">
+                <AlertTriangle size={15} className="text-warning mt-0.5 shrink-0" />
+                <p className="text-xs text-warning">
+                  <strong>Tracking only — budgets are not enforced.</strong> Agents will not be paused or restricted when a budget is exceeded. These figures are for monitoring and planning only.
+                </p>
+              </div>
               <p className="text-sm text-text-secondary mb-4">Monthly budget tracking by department. Projected cost based on current daily usage × 30 days.</p>
               <Table
                 columns={[

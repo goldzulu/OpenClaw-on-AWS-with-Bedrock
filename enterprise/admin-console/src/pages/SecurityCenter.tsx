@@ -11,8 +11,10 @@ import {
   usePositionSoul, useUpdatePositionSoul,
   usePositionTools, useUpdatePositionTools,
   useInfrastructure,
-  useModelConfig,
+  useModelConfig, useUpdateModelConfig, useUpdateFallbackModel,
+  useSetPositionModel, useRemovePositionModel,
 } from '../hooks/useApi';
+import { Select } from '../components/ui';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -315,6 +317,142 @@ function ToolsEditModal({ pos, onClose }: { pos: any; onClose: () => void }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+// ─── LLM Provider Tab ────────────────────────────────────────────────────────
+
+function LLMProviderTab({ positions }: { positions: any[] }) {
+  const { data: mc } = useModelConfig();
+  const updateDefault = useUpdateModelConfig();
+  const updateFallback = useUpdateFallbackModel();
+  const setPositionModel = useSetPositionModel();
+  const removePositionModel = useRemovePositionModel();
+  const [showModal, setShowModal] = useState<'default' | 'fallback' | 'override' | null>(null);
+  const [selectedModelId, setSelectedModelId] = useState('');
+  const [overridePosId, setOverridePosId] = useState('');
+  const [overrideReason, setOverrideReason] = useState('');
+
+  const m = mc || { default: { modelId: '', modelName: 'Loading...', inputRate: 0, outputRate: 0 }, fallback: { modelId: '', modelName: '', inputRate: 0, outputRate: 0 }, positionOverrides: {}, availableModels: [] };
+  const modelOptions = m.availableModels.map((mo: any) => ({ label: `${mo.modelName} ($${mo.inputRate}/$${mo.outputRate})`, value: mo.modelId }));
+  const findModel = (id: string) => m.availableModels.find((mo: any) => mo.modelId === id);
+
+  const handleSave = () => {
+    const model = findModel(selectedModelId);
+    if (!model) return;
+    if (showModal === 'default') updateDefault.mutate({ modelId: model.modelId, modelName: model.modelName, inputRate: model.inputRate, outputRate: model.outputRate });
+    else if (showModal === 'fallback') updateFallback.mutate({ modelId: model.modelId, modelName: model.modelName, inputRate: model.inputRate, outputRate: model.outputRate });
+    else if (showModal === 'override' && overridePosId) setPositionModel.mutate({ posId: overridePosId, modelId: model.modelId, modelName: model.modelName, inputRate: model.inputRate, outputRate: model.outputRate, reason: overrideReason || 'Custom model for position' });
+    setShowModal(null); setSelectedModelId(''); setOverridePosId(''); setOverrideReason('');
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-xl bg-info/5 border border-info/20 px-4 py-3 text-xs text-info">
+        Model changes take effect on the next agent cold start (~15 min idle timeout).
+      </div>
+      {/* Default + Fallback */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {[
+          { title: 'Default Model', model: m.default, action: () => { setShowModal('default'); setSelectedModelId(m.default.modelId); }, color: 'primary' as const },
+          { title: 'Fallback Model', model: m.fallback, action: () => { setShowModal('fallback'); setSelectedModelId(m.fallback.modelId); }, color: 'warning' as const },
+        ].map(r => (
+          <Card key={r.title}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold">{r.title}</h3>
+              <Button variant="primary" size="sm" onClick={r.action}>Change</Button>
+            </div>
+            <div className="rounded-xl bg-surface-dim p-3 space-y-1.5">
+              <p className="text-base font-semibold text-text-primary">{r.model.modelName || '—'}</p>
+              <p className="text-xs font-mono text-text-muted">{r.model.modelId}</p>
+              <div className="flex gap-2 mt-1">
+                <Badge color={r.color}>In: ${r.model.inputRate}/1M</Badge>
+                <Badge color={r.color}>Out: ${r.model.outputRate}/1M</Badge>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+      {/* Per-Position Overrides */}
+      <Card>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-sm font-semibold">Per-Position Model Overrides</h3>
+            <p className="text-xs text-text-muted">Override the default model for specific positions</p>
+          </div>
+          <Button variant="primary" size="sm" onClick={() => setShowModal('override')}><Plus size={14} /> Add Override</Button>
+        </div>
+        {Object.keys(m.positionOverrides).length === 0 ? (
+          <p className="text-sm text-text-muted text-center py-6">No overrides — all positions use the default model</p>
+        ) : (
+          <div className="divide-y divide-dark-border/30">
+            {Object.entries(m.positionOverrides).map(([posId, ov]: [string, any]) => (
+              <div key={posId} className="flex items-center justify-between py-3">
+                <div>
+                  <p className="text-sm font-medium">{positions.find(p => p.id === posId)?.name || posId}</p>
+                  <p className="text-xs text-text-muted">{ov.modelName} · {ov.reason}</p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => removePositionModel.mutate(posId)}>Remove</Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+      {/* Available Models */}
+      <Card>
+        <h3 className="text-sm font-semibold mb-4">Available Models</h3>
+        <div className="space-y-2">
+          {m.availableModels.map((mo: any) => {
+            const isDefault = mo.modelId === m.default.modelId;
+            const isFallback = mo.modelId === m.fallback.modelId;
+            return (
+              <div key={mo.modelId} className={`flex items-center justify-between rounded-xl px-4 py-3 ${isDefault ? 'bg-primary/5 border border-primary/20' : isFallback ? 'bg-warning/5 border border-warning/20' : 'bg-surface-dim'}`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-2 h-2 rounded-full ${mo.enabled ? 'bg-success' : 'bg-text-muted'}`} />
+                  <div>
+                    <p className="text-sm font-medium">{mo.modelName}</p>
+                    <p className="text-xs font-mono text-text-muted">{mo.modelId}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-text-muted">${mo.inputRate} / ${mo.outputRate}</span>
+                  {isDefault && <Badge color="primary">Default</Badge>}
+                  {isFallback && <Badge color="warning">Fallback</Badge>}
+                  {!isDefault && !isFallback && mo.enabled && (
+                    <Button variant="ghost" size="sm" onClick={() => updateDefault.mutate({ modelId: mo.modelId, modelName: mo.modelName, inputRate: mo.inputRate, outputRate: mo.outputRate })}>Set Default</Button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+      {/* Modal */}
+      {showModal && (
+        <Modal open={true} onClose={() => setShowModal(null)}
+          title={showModal === 'default' ? 'Change Default Model' : showModal === 'fallback' ? 'Change Fallback Model' : 'Add Position Override'}
+          footer={<div className="flex justify-end gap-3"><Button variant="default" onClick={() => setShowModal(null)}>Cancel</Button><Button variant="primary" onClick={handleSave}>Apply</Button></div>}>
+          <div className="space-y-4">
+            {showModal === 'override' && (
+              <Select label="Position" value={overridePosId} onChange={setOverridePosId}
+                options={positions.filter(p => !m.positionOverrides[p.id]).map(p => ({ label: p.name, value: p.id }))}
+                placeholder="Select position" />
+            )}
+            <Select label="Model" value={selectedModelId} onChange={setSelectedModelId} options={modelOptions} placeholder="Select model" />
+            {showModal === 'override' && (
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-text-secondary">Reason</label>
+                <input value={overrideReason} onChange={e => setOverrideReason(e.target.value)}
+                  className="w-full rounded-xl border border-dark-border/60 bg-surface-dim px-4 py-2.5 text-sm text-text-primary focus:border-primary/60 focus:outline-none"
+                  placeholder="e.g. Needs reasoning for architecture review" />
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
 export default function SecurityCenter() {
   const [tab, setTab] = useState('runtimes');
   const { data: runtimesData, isLoading: rtLoading } = useSecurityRuntimes();
@@ -339,6 +477,7 @@ export default function SecurityCenter() {
         tabs={[
           { id: 'runtimes', label: 'Agent Runtimes' },
           { id: 'policies', label: 'Security Policies' },
+          { id: 'models', label: 'LLM Provider' },
           { id: 'infrastructure', label: 'Infrastructure' },
         ]}
         activeTab={tab}
@@ -464,6 +603,9 @@ export default function SecurityCenter() {
             </Card>
           </div>
         )}
+
+        {/* ── LLM Provider ── */}
+        {tab === 'models' && <LLMProviderTab positions={positions} />}
 
         {/* ── Infrastructure ── */}
         {tab === 'infrastructure' && (
