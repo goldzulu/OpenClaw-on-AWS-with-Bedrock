@@ -245,7 +245,7 @@ Switch models with one CloudFormation parameter — no code changes:
 
 Best for most users. Fixed cost, full control, 24/7 availability.
 
-### Multi-Tenant Platform (AgentCore Runtime) — [README_AGENTCORE.md](README_AGENTCORE.md)
+### Multi-Tenant Platform (AgentCore Runtime) — [README_ENTERPRISE.md](README_ENTERPRISE.md)
 
 > ✅ **E2E verified** — Full pipeline running: IM → Gateway → Bedrock H2 Proxy → Tenant Router → AgentCore Firecracker microVM → OpenClaw CLI → Bedrock → response. [Demo Guide →](demo/README.md)
 
@@ -280,7 +280,7 @@ Telegram/WhatsApp message
 | Cost for 50 users | ~$65-110/month (~$1.30-2.20/person) |
 | vs ChatGPT Plus (50 users) | $1,000/month |
 
-**[→ Full Multi-Tenant Guide](README_AGENTCORE.md)** · **[→ Roadmap](ROADMAP.md)**
+**[→ Full Multi-Tenant Guide](README_ENTERPRISE.md)** · **[→ Roadmap](ROADMAP.md)**
 
 ### 🏢 Enterprise Digital Workforce Platform — [enterprise/](enterprise/)
 
