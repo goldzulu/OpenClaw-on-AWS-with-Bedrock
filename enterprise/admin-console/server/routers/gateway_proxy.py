@@ -28,7 +28,7 @@ import os
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 import requests as _requests
 
 logger = logging.getLogger(__name__)
@@ -335,3 +335,72 @@ async def proxy_gateway(path: str, request: Request, authorization: str = Header
         raise HTTPException(504, "Gateway request timed out")
     except Exception as e:
         raise HTTPException(502, f"Gateway proxy error: {e}")
+
+
+@router.websocket("/ui/{path:path}")
+async def proxy_gateway_ws(websocket: WebSocket, path: str):
+    """WebSocket proxy to the always-on agent's OpenClaw Gateway.
+    Authenticates via gw_session cookie (set by the HTTP proxy on first page load).
+    Then bi-directionally forwards WebSocket frames."""
+    import asyncio
+
+    # Authenticate via cookie (same as HTTP proxy)
+    cookie_token = websocket.cookies.get("gw_session", "")
+    if not cookie_token:
+        await websocket.close(code=4001, reason="Missing auth cookie")
+        return
+    try:
+        user = _require_employee_auth(f"Bearer {cookie_token}")
+    except Exception:
+        await websocket.close(code=4001, reason="Invalid auth")
+        return
+
+    result = _get_cached_gateway(user.employee_id)
+    if not result:
+        await websocket.close(code=4003, reason="Gateway not available")
+        return
+
+    base_url, gw_token = result
+    # Build upstream WebSocket URL
+    ws_base = base_url.replace("http://", "ws://").replace(":8080", ":18789")
+    ws_target = f"{ws_base}/{path}"
+    if gw_token:
+        ws_target += f"?token={gw_token}"
+
+    # Forward query params from client (except auth_token)
+    qs = str(websocket.query_params)
+    filtered = "&".join(p for p in qs.split("&") if p and not p.startswith("auth_token="))
+    if filtered:
+        ws_target += ("&" if "?" in ws_target else "?") + filtered
+
+    await websocket.accept()
+
+    try:
+        import websockets
+        async with websockets.connect(ws_target, open_timeout=5, close_timeout=3) as upstream:
+            async def client_to_upstream():
+                try:
+                    while True:
+                        data = await websocket.receive_text()
+                        await upstream.send(data)
+                except WebSocketDisconnect:
+                    pass
+
+            async def upstream_to_client():
+                try:
+                    async for msg in upstream:
+                        if isinstance(msg, str):
+                            await websocket.send_text(msg)
+                        else:
+                            await websocket.send_bytes(msg)
+                except Exception:
+                    pass
+
+            await asyncio.gather(client_to_upstream(), upstream_to_client())
+    except Exception as e:
+        logger.warning("Gateway WS proxy error: %s", e)
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
