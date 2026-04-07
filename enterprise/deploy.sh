@@ -207,11 +207,13 @@ else
   COPYFILE_DISABLE=1 tar czf "$TARBALL" \
     -C "$SCRIPT_DIR/.." \
     enterprise/agent-container \
-    enterprise/exec-agent 2>/dev/null || \
+    enterprise/exec-agent \
+    enterprise/auth-agent 2>/dev/null || \
   tar czf "$TARBALL" \
     -C "$SCRIPT_DIR/.." \
     enterprise/agent-container \
-    enterprise/exec-agent
+    enterprise/exec-agent \
+    enterprise/auth-agent
   aws s3 cp "$TARBALL" "s3://${S3_BUCKET}/_build/agent-build.tar.gz" \
     --region "$REGION" --quiet
   rm -f "$TARBALL"
@@ -232,7 +234,7 @@ else
       \"aws s3 cp s3://${S3_BUCKET}/_build/agent-build.tar.gz . --region ${REGION}\",
       \"tar xzf agent-build.tar.gz\",
       \"aws ecr get-login-password --region ${REGION} | docker login --username AWS --password-stdin \${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com\",
-      \"docker build -f enterprise/agent-container/Dockerfile -t \${ECR_URI}:latest .\",
+      \"docker build -f enterprise/agent-container/Dockerfile -t \${ECR_URI}:latest enterprise/\",
       \"docker push \${ECR_URI}:latest\",
       \"echo BUILD_AND_PUSH_COMPLETE\"
     ]" \
@@ -380,6 +382,13 @@ else
   fi
 
   cd "$SEED_DIR"
+  if ! command -v pip3 &>/dev/null; then
+    info "  Installing pip3..."
+    sudo apt-get update -qq && sudo apt-get install -y -qq python3-pip 2>/dev/null \
+      || sudo yum install -y python3-pip 2>/dev/null \
+      || { error "Failed to install pip3. Please install it manually."; exit 1; }
+  fi
+  pip3 install -q -r requirements.txt
   AWS_REGION="$DYNAMODB_REGION" python3 seed_dynamodb.py --table "$DYNAMODB_TABLE" --region "$DYNAMODB_REGION" && \
     success "  Org data seeded (employees, positions, departments)"
 
