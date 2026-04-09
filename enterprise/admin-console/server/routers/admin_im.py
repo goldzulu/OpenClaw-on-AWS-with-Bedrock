@@ -27,24 +27,43 @@ def _mapping_prefix():
     return f"/openclaw/{stack}/user-mapping/"
 
 
+def _find_openclaw_bin() -> str:
+    """Find the openclaw binary regardless of Node.js version."""
+    import glob
+    patterns = [
+        "/home/ubuntu/.nvm/versions/node/*/bin/openclaw",
+        "/usr/local/bin/openclaw",
+        "/usr/bin/openclaw",
+    ]
+    for pattern in patterns:
+        matches = glob.glob(pattern)
+        if matches:
+            return matches[0]
+    return "openclaw"  # fallback to PATH lookup
+
+
 def _run_openclaw_channels() -> list:
     """Get live channel status from openclaw channels list CLI."""
     import subprocess as _sp
-    openclaw_bin = "/home/ubuntu/.nvm/versions/node/v22.22.1/bin/openclaw"
-    env_path = "/home/ubuntu/.nvm/versions/node/v22.22.1/bin:/usr/local/bin:/usr/bin:/bin"
+    openclaw_bin = _find_openclaw_bin()
+    env_path = os.path.dirname(openclaw_bin) + ":/usr/local/bin:/usr/bin:/bin"
     try:
         result = _sp.run(
             ["sudo", "-u", "ubuntu", "env", f"PATH={env_path}", "HOME=/home/ubuntu",
              openclaw_bin, "channels", "list", "--json"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=15,
         )
         if result.stdout:
-            raw = json.loads(result.stdout)
-            channels = []
-            for ch_type, accounts in raw.get("chat", {}).items():
-                for account in accounts:
-                    channels.append({"channel": ch_type, "account": account, "type": "chat"})
-            return channels
+            # openclaw prints plugin registration logs before JSON — find the first '{'
+            stdout = result.stdout
+            json_start = stdout.find('{')
+            if json_start >= 0:
+                raw = json.loads(stdout[json_start:])
+                channels = []
+                for ch_type, accounts in raw.get("chat", {}).items():
+                    for account in accounts:
+                        channels.append({"channel": ch_type, "account": account, "type": "chat"})
+                return channels
     except Exception:
         pass
     # Fallback: parse openclaw channels list text output
@@ -52,7 +71,7 @@ def _run_openclaw_channels() -> list:
         result = _sp.run(
             ["sudo", "-u", "ubuntu", "env", f"PATH={env_path}", "HOME=/home/ubuntu",
              openclaw_bin, "channels", "list"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=15,
         )
         channels = []
         for line in result.stdout.splitlines():
@@ -259,12 +278,12 @@ def test_im_channel(channel: str, authorization: str = Header(default="")):
     require_role(authorization, roles=["admin"])
     try:
         import subprocess as _sp
-        openclaw_bin = "/home/ubuntu/.nvm/versions/node/v22.22.1/bin/openclaw"
-        env_path = "/home/ubuntu/.nvm/versions/node/v22.22.1/bin:/usr/local/bin:/usr/bin:/bin"
+        openclaw_bin = _find_openclaw_bin()
+        env_path = os.path.dirname(openclaw_bin) + ":/usr/local/bin:/usr/bin:/bin"
         result = _sp.run(
             ["sudo", "-u", "ubuntu", "env", f"PATH={env_path}", "HOME=/home/ubuntu",
              openclaw_bin, "channels", "list", "--json"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=15,
         )
         if result.stdout:
             import json as _json
