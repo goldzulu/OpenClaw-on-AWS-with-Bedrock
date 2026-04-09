@@ -31,7 +31,7 @@ router = APIRouter(tags=["settings"])
 # Server start time — used to compute uptime for /settings/services
 _SERVER_START_TIME = time.time()
 
-AWS_REGION = os.environ.get("AWS_REGION", "us-east-2")
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
 
 # =========================================================================
@@ -59,7 +59,7 @@ def _get_model_config():
 def _get_security_config():
     config = db.get_config("security")
     if not config:
-        return {"alwaysBlocked": ["install_skill", "load_extension", "eval"], "piiDetection": {"enabled": True, "mode": "redact"}, "dataSovereignty": {"enabled": True, "region": "us-east-2"}, "conversationRetention": {"days": 180}, "dockerSandbox": True, "fastPathRouting": True, "verboseAudit": False}
+        return {"alwaysBlocked": ["install_skill", "load_extension", "eval"], "piiDetection": {"enabled": True, "mode": "redact"}, "dataSovereignty": {"enabled": True, "region": "us-east-1"}, "conversationRetention": {"days": 180}, "dockerSandbox": True, "fastPathRouting": True, "verboseAudit": False}
     return config
 
 
@@ -541,7 +541,7 @@ def change_admin_password(body: dict, authorization: str = Header(default="")):
     if len(new_pw) < 8:
         raise HTTPException(400, "Password must be at least 8 characters")
     try:
-        stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+        stack = os.environ.get("STACK_NAME", "openclaw")
         boto3.client("ssm", region_name=GATEWAY_REGION).put_parameter(
             Name=f"/openclaw/{stack}/admin-password",
             Value=new_pw, Type="SecureString", Overwrite=True)

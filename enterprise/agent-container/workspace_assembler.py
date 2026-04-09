@@ -50,8 +50,8 @@ def get_tenant_position(ssm, stack_name: str, tenant_id: str) -> str:
     2. If base_id is not an emp-id, resolve via DynamoDB MAPPING# → emp_id
     3. Read positionId from DynamoDB EMP#{emp_id}
     """
-    ddb_region = os.environ.get("DYNAMODB_REGION", "us-east-2")
-    ddb_table = os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise")
+    ddb_region = os.environ.get("DYNAMODB_REGION", os.environ.get("AWS_REGION", "us-east-1"))
+    ddb_table = os.environ.get("DYNAMODB_TABLE", os.environ.get("STACK_NAME", "openclaw"))
 
     # Strip Tenant Router prefix/suffix: <channel>__<user_id>__<hash>
     base_id = tenant_id
@@ -430,7 +430,7 @@ def main():
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--bucket", required=True)
     parser.add_argument("--stack", required=True)
-    parser.add_argument("--region", default="us-east-2")
+    parser.add_argument("--region", default=os.environ.get("AWS_REGION", "us-east-1"))
     parser.add_argument("--position", default="", help="Position ID (e.g. pos-sa). If not provided, reads from SSM.")
     args = parser.parse_args()
     

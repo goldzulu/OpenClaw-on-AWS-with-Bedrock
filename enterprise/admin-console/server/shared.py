@@ -17,10 +17,10 @@ logger = logging.getLogger(__name__)
 
 # ── Config ──────────────────────────────────────────────────────────────
 GATEWAY_REGION = os.environ.get("GATEWAY_REGION", os.environ.get("SSM_REGION", "us-east-1"))
-STACK_NAME = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+STACK_NAME = os.environ.get("STACK_NAME", "openclaw")
 S3_BUCKET_ENV = os.environ.get("S3_BUCKET", "")
-DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE") or os.environ.get("STACK_NAME", "openclaw-enterprise")
-DYNAMODB_REGION = os.environ.get("DYNAMODB_REGION", "us-east-2")
+DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE") or os.environ.get("STACK_NAME", "openclaw")
+DYNAMODB_REGION = os.environ.get("DYNAMODB_REGION", os.environ.get("AWS_REGION", "us-east-1"))
 CONSOLE_PORT = os.environ.get("CONSOLE_PORT", "8099")
 ALWAYS_ON_ECR_IMAGE = os.environ.get("AGENT_ECR_IMAGE", "")
 

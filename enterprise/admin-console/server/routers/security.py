@@ -90,7 +90,7 @@ def put_position_tools(pos_id: str, body: dict, authorization: str = Header(defa
     try:
         import boto3 as _b3_sec
         ddb = _b3_sec.resource("dynamodb", region_name=GATEWAY_REGION)
-        table = ddb.Table(os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise"))
+        table = ddb.Table(os.environ.get("DYNAMODB_TABLE", os.environ.get("STACK_NAME", "openclaw")))
         table.update_item(
             Key={"PK": "ORG#acme", "SK": f"POS#{pos_id}"},
             UpdateExpression="SET toolAllowlist = :tools",
@@ -339,8 +339,8 @@ def create_runtime(body: CreateRuntimeRequest, authorization: str = Header(defau
         from shared import GATEWAY_ACCOUNT_ID
         bucket = os.environ.get("S3_BUCKET", f"openclaw-tenants-{GATEWAY_ACCOUNT_ID}")
         region = os.environ.get("AWS_REGION", "us-east-1")
-        ddb_region = os.environ.get("DYNAMODB_REGION", "us-east-2")
-        ddb_table = os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise")
+        ddb_region = os.environ.get("DYNAMODB_REGION", os.environ.get("AWS_REGION", "us-east-1"))
+        ddb_table = os.environ.get("DYNAMODB_TABLE", os.environ.get("STACK_NAME", "openclaw"))
 
         resp = ac.create_agent_runtime(
             agentRuntimeName=body.name,

@@ -23,7 +23,7 @@ router = APIRouter(tags=["admin-im"])
 
 # Import mapping helpers from main at call time to avoid circular imports
 def _mapping_prefix():
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     return f"/openclaw/{stack}/user-mapping/"
 
 
@@ -230,8 +230,8 @@ def im_binding_check(channel: str, channelUserId: str):
     # Fallback: scan MAPPING# for bare channelUserId (Feishu OU IDs, etc.)
     try:
         from boto3.dynamodb.conditions import Key as _KBC, Attr as _ABC
-        ddb = boto3.resource("dynamodb", region_name=os.environ.get("DYNAMODB_REGION", "us-east-2"))
-        table = ddb.Table(os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise"))
+        ddb = boto3.resource("dynamodb", region_name=os.environ.get("DYNAMODB_REGION", os.environ.get("AWS_REGION", "us-east-1")))
+        table = ddb.Table(os.environ.get("DYNAMODB_TABLE", os.environ.get("STACK_NAME", "openclaw")))
         resp = table.query(
             KeyConditionExpression=_KBC("PK").eq("ORG#acme") & _KBC("SK").begins_with("MAPPING#"),
             FilterExpression=_ABC("channelUserId").eq(channelUserId),

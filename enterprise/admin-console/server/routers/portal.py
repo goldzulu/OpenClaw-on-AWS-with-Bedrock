@@ -153,8 +153,8 @@ def pair_start(body: PairStartRequest, authorization: str = Header(default="")):
     # Cancel existing pending tokens for this employee+channel (prevent token accumulation)
     try:
         from boto3.dynamodb.conditions import Key as _KPS, Attr as _APS
-        ddb = boto3.resource("dynamodb", region_name=os.environ.get("DYNAMODB_REGION", "us-east-2"))
-        table = ddb.Table(os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise"))
+        ddb = boto3.resource("dynamodb", region_name=os.environ.get("DYNAMODB_REGION", os.environ.get("AWS_REGION", "us-east-1")))
+        table = ddb.Table(os.environ.get("DYNAMODB_TABLE", os.environ.get("STACK_NAME", "openclaw")))
         resp = table.query(
             KeyConditionExpression=_KPS("PK").eq("ORG#acme") & _KPS("SK").begins_with("PAIR#"),
             FilterExpression=_APS("employeeId").eq(user.employee_id)
@@ -431,7 +431,7 @@ def portal_chat(body: PortalChatMessage, authorization: str = Header(default="")
             })
 
             # Detect if response came from always-on container vs AgentCore Runtime
-            stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+            stack = os.environ.get("STACK_NAME", "openclaw")
             source = "agentcore"
             try:
                 _ssm_src = boto3.client("ssm", region_name=GATEWAY_REGION)
@@ -489,7 +489,7 @@ def portal_profile(authorization: str = Header(default="")):
     memory_preview = memory_md[:2048] if memory_md else None
 
     # Determine deployment mode and IM connection info
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     is_always_on = False
     deploy_mode = agent.get("deployMode", "serverless") if agent else "serverless"
     always_on_agent_id = None
@@ -688,7 +688,7 @@ def portal_channels(authorization: str = Header(default="")):
     - pairingInstructions: per-channel guidance based on deploy mode
     """
     user = require_auth(authorization)
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
 
     # Determine deploy mode
     is_always_on = False

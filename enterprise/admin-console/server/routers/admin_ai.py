@@ -18,7 +18,7 @@ from shared import require_role, GATEWAY_REGION
 
 router = APIRouter(tags=["admin-ai"])
 
-AWS_REGION = os.environ.get("AWS_REGION", "us-east-2")
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
 _ADMIN_AI_MODEL = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 

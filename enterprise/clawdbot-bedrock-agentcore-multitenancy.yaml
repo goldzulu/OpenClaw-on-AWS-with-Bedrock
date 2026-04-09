@@ -796,7 +796,7 @@ Resources:
               "controlUi": {
                 "enabled": true,
                 "allowInsecureAuth": true,
-                "root": "/home/ubuntu/.nvm/versions/node/v22.22.0/lib/node_modules/openclaw/dist/control-ui"
+                "root": "/usr/local/lib/node_modules/openclaw/dist/control-ui"
               },
               "auth": {
                 "mode": "token",

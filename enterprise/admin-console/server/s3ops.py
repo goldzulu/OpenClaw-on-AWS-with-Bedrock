@@ -10,7 +10,7 @@ from typing import Optional
 import boto3
 from botocore.exceptions import ClientError
 
-AWS_REGION = os.environ.get("AWS_REGION", "us-east-2")
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 _s3 = None
 _bucket = None
 

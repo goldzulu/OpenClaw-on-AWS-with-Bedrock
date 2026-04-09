@@ -60,7 +60,7 @@ def _require_employee_auth(authorization: str) -> _UserInfo:
     # Decode JWT (HS256) — read secret from SSM
     try:
         boto3 = _get_boto3()
-        stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+        stack = os.environ.get("STACK_NAME", "openclaw")
         region = os.environ.get("GATEWAY_REGION", "us-east-1")
         secret = boto3.client("ssm", region_name=region).get_parameter(
             Name=f"/openclaw/{stack}/jwt-secret", WithDecryption=True
@@ -89,11 +89,9 @@ def _get_agent_gateway_url(employee_id: str) -> Optional[str]:
     """Resolve the always-on agent's Gateway URL for an employee.
     Returns http://{container_ip}:18789/?token={gw_token} or None."""
     boto3 = _get_boto3()
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     region = os.environ.get("GATEWAY_REGION", os.environ.get("AWS_REGION", "us-east-1"))
-    # SSM params are in the gateway region (us-east-1), not DynamoDB region (us-east-2)
-    if region == "us-east-2":
-        region = "us-east-1"
+    
     ssm = boto3.client("ssm", region_name=region)
 
     # 1. Check if employee has an always-on agent
@@ -144,11 +142,9 @@ def _get_cached_gateway(employee_id: str) -> Optional[tuple]:
             return base, token
 
     boto3 = _get_boto3()
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     region = os.environ.get("GATEWAY_REGION", os.environ.get("AWS_REGION", "us-east-1"))
-    # SSM params are in the gateway region (us-east-1), not DynamoDB region (us-east-2)
-    if region == "us-east-2":
-        region = "us-east-1"
+    
     ssm = boto3.client("ssm", region_name=region)
 
     print(f"[gateway-proxy] stack={stack} region={region} emp={employee_id}")

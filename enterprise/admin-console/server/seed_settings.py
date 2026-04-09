@@ -33,7 +33,7 @@ def seed(table_name: str, region: str):
     items.append({"PK": ORG, "SK": "CONFIG#security", "GSI1PK": "TYPE#config", "GSI1SK": "CONFIG#security",
         "alwaysBlocked": ["install_skill", "load_extension", "eval", "rm -rf /", "chmod 777"],
         "piiDetection": {"enabled": True, "mode": "redact"},
-        "dataSovereignty": {"enabled": True, "region": "us-east-2"},
+        "dataSovereignty": {"enabled": True, "region": "us-east-1"},
         "conversationRetention": {"days": 180},
         "dockerSandbox": True,
         "fastPathRouting": True,
@@ -101,7 +101,7 @@ def seed(table_name: str, region: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--table", default="openclaw-enterprise")
-    parser.add_argument("--region", default="us-east-2")
+    parser.add_argument("--table", default=os.environ.get("DYNAMODB_TABLE", "openclaw"))
+    parser.add_argument("--region", default=os.environ.get("AWS_REGION", "us-east-1"))
     args = parser.parse_args()
     seed(args.table, args.region)

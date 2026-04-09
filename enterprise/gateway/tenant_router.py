@@ -30,8 +30,8 @@ logger = logging.getLogger(__name__)
 
 STACK_NAME = os.environ.get("STACK_NAME", "dev")
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
-DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise")
-DYNAMODB_REGION = os.environ.get("DYNAMODB_REGION", "us-east-2")
+DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE", os.environ.get("STACK_NAME", "openclaw"))
+DYNAMODB_REGION = os.environ.get("DYNAMODB_REGION", os.environ.get("AWS_REGION", "us-east-1"))
 RUNTIME_ID = os.environ.get("AGENTCORE_RUNTIME_ID", "")
 ROUTER_PORT = int(os.environ.get("ROUTER_PORT", "8090"))
 

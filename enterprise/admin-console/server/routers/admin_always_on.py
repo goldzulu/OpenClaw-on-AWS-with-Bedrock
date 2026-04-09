@@ -32,7 +32,7 @@ _ALWAYS_ON_ECR_IMAGE = os.environ.get("AGENT_ECR_IMAGE", "")
 
 def _get_ecs_config() -> dict:
     """Resolve ECS cluster / task-def / subnet / SG from env or CloudFormation outputs via SSM."""
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     cluster   = os.environ.get("ECS_CLUSTER_NAME",      f"{stack}-always-on")
     task_def  = os.environ.get("ECS_TASK_DEFINITION",   f"{stack}-always-on-agent")
     subnet_id = os.environ.get("ECS_SUBNET_ID",         "")
@@ -113,7 +113,7 @@ def start_always_on_agent(agent_id: str, authorization: str = Header(default="")
     stack     = os.environ.get("STACK_NAME",      "openclaw-multitenancy")
     bucket    = os.environ.get("S3_BUCKET",       f"openclaw-tenants-{GATEWAY_ACCOUNT_ID}")
     ddb_table = os.environ.get("DYNAMODB_TABLE",  "openclaw-enterprise")
-    ddb_region = os.environ.get("DYNAMODB_REGION", "us-east-2")
+    ddb_region = os.environ.get("DYNAMODB_REGION", os.environ.get("AWS_REGION", "us-east-1"))
 
     agent = db.get_agent(agent_id)
     if not agent:
@@ -241,7 +241,7 @@ def stop_always_on_agent(agent_id: str, authorization: str = Header(default=""))
     """Stop the always-on agent by scaling its ECS Service to 0.
     Service definition is preserved — start will scale back to 1."""
     require_role(authorization, roles=["admin"])
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     service_name = _ecs_service_name(agent_id)
 
     try:
@@ -283,9 +283,9 @@ def stop_always_on_agent(agent_id: str, authorization: str = Header(default=""))
 
     # Update DynamoDB
     try:
-        ddb_region = os.environ.get("DYNAMODB_REGION", "us-east-2")
+        ddb_region = os.environ.get("DYNAMODB_REGION", os.environ.get("AWS_REGION", "us-east-1"))
         ddb = boto3.resource("dynamodb", region_name=ddb_region)
-        ddb.Table(os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise")).update_item(
+        ddb.Table(os.environ.get("DYNAMODB_TABLE", os.environ.get("STACK_NAME", "openclaw"))).update_item(
             Key={"PK": "ORG#acme", "SK": f"AGENT#{agent_id}"},
             UpdateExpression="SET deployMode = :m, containerStatus = :s",
             ExpressionAttributeValues={":m": "serverless", ":s": "stopped"},
@@ -301,7 +301,7 @@ def set_always_on_tokens(agent_id: str, body: dict, authorization: str = Header(
     """Store IM bot tokens for a always-on agent (Plan A: direct IM connection).
     Tokens are stored as SSM SecureStrings and injected at ECS task startup."""
     require_role(authorization, roles=["admin"])
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     ssm = boto3.client("ssm", region_name=GATEWAY_REGION)
     saved = {}
     for channel, key in [("telegram", "telegram-token"), ("discord", "discord-token")]:
@@ -325,7 +325,7 @@ def set_always_on_tokens(agent_id: str, body: dict, authorization: str = Header(
 def get_always_on_tokens(agent_id: str, authorization: str = Header(default="")):
     """Check which IM tokens are configured for an always-on agent (masked)."""
     require_role(authorization, roles=["admin"])
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     ssm = boto3.client("ssm", region_name=GATEWAY_REGION)
     result = {}
     for channel, key in [("telegram", "telegram-token"), ("discord", "discord-token")]:
@@ -343,10 +343,10 @@ def reload_always_on_agent(agent_id: str, body: dict, authorization: str = Heade
     ECS gracefully replaces the running task with a fresh one using the latest image.
     If env vars changed (bot tokens, config), re-registers the task definition first."""
     require_role(authorization, roles=["admin"])
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     bucket = os.environ.get("S3_BUCKET", f"openclaw-tenants-{GATEWAY_ACCOUNT_ID}")
-    ddb_table = os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise")
-    ddb_region = os.environ.get("DYNAMODB_REGION", "us-east-2")
+    ddb_table = os.environ.get("DYNAMODB_TABLE", os.environ.get("STACK_NAME", "openclaw"))
+    ddb_region = os.environ.get("DYNAMODB_REGION", os.environ.get("AWS_REGION", "us-east-1"))
 
     agent = db.get_agent(agent_id)
     if not agent:
@@ -421,7 +421,7 @@ def reload_always_on_agent(agent_id: str, body: dict, authorization: str = Heade
 def list_agent_images(agent_id: str, authorization: str = Header(default="")):
     """List available ECR image tags for deploying to this always-on agent."""
     require_role(authorization, roles=["admin"])
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     try:
         ecr = boto3.client("ecr", region_name=GATEWAY_REGION)
         # ECR repo name follows the pattern: {stack}-multitenancy-agent
@@ -448,7 +448,7 @@ def list_agent_images(agent_id: str, authorization: str = Header(default="")):
 def get_always_on_status(agent_id: str, authorization: str = Header(default="")):
     """Get status of an always-on ECS Fargate task."""
     require_role(authorization, roles=["admin"])
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     ssm = boto3.client("ssm", region_name=GATEWAY_REGION)
 
     task_arn = ""
@@ -487,7 +487,7 @@ def get_always_on_status(agent_id: str, authorization: str = Header(default=""))
 def assign_always_on_to_employee(agent_id: str, emp_id: str, authorization: str = Header(default="")):
     """Assign an employee to use the always-on agent instead of AgentCore."""
     require_role(authorization, roles=["admin"])
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     ssm = boto3.client("ssm", region_name=GATEWAY_REGION)
     ssm.put_parameter(
         Name=f"/openclaw/{stack}/tenants/{emp_id}/always-on-agent",
@@ -500,7 +500,7 @@ def assign_always_on_to_employee(agent_id: str, emp_id: str, authorization: str 
 def unassign_always_on_from_employee(agent_id: str, emp_id: str, authorization: str = Header(default="")):
     """Remove employee's always-on assignment — they fall back to AgentCore."""
     require_role(authorization, roles=["admin"])
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     try:
         boto3.client("ssm", region_name=GATEWAY_REGION).delete_parameter(
             Name=f"/openclaw/{stack}/tenants/{emp_id}/always-on-agent"

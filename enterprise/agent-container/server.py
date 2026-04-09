@@ -93,8 +93,8 @@ WORKSPACE = os.environ.get("OPENCLAW_WORKSPACE", "/root/.openclaw/workspace")
 S3_BUCKET = os.environ.get("S3_BUCKET", "openclaw-tenants-000000000000")
 STACK_NAME = os.environ.get("STACK_NAME", "dev")
 AWS_REGION_RUNTIME = os.environ.get("AWS_REGION", "us-east-1")
-DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise")
-DYNAMODB_REGION = os.environ.get("DYNAMODB_REGION", "us-east-2")
+DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE", os.environ.get("STACK_NAME", "openclaw"))
+DYNAMODB_REGION = os.environ.get("DYNAMODB_REGION", os.environ.get("AWS_REGION", "us-east-1"))
 
 
 def _append_conversation_turn(tenant_id: str, user_message: str, assistant_reply: str, model: str, duration_ms: int):
@@ -325,8 +325,8 @@ def _ensure_workspace_assembled(tenant_id: str) -> None:
         if not base_id.startswith("emp-"):
             try:
                 import boto3 as _b3_mapping
-                ddb = _b3_mapping.resource("dynamodb", region_name=os.environ.get("DYNAMODB_REGION", "us-east-2"))
-                table = ddb.Table(os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise"))
+                ddb = _b3_mapping.resource("dynamodb", region_name=os.environ.get("DYNAMODB_REGION", os.environ.get("AWS_REGION", "us-east-1")))
+                table = ddb.Table(os.environ.get("DYNAMODB_TABLE", os.environ.get("STACK_NAME", "openclaw")))
                 channel_prefix = parts[0] if len(parts) >= 2 else ""
                 # Try exact channel+userId key first
                 resp_ddb = table.get_item(Key={"PK": "ORG#acme", "SK": f"MAPPING#{channel_prefix}__{base_id}"})
@@ -1210,7 +1210,7 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
                 return
 
         # Check session takeover — if admin has taken over, skip agent invocation
-        stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+        stack = os.environ.get("STACK_NAME", "openclaw")
         region = os.environ.get("AWS_REGION", "us-east-1")
         session_key = tenant_id[:40]
         try:

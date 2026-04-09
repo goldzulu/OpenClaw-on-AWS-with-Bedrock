@@ -51,7 +51,7 @@ _SERVER_START_TIME = time.time()
 _LOG_GROUPS = [
     "/aws/bedrock-agentcore/runtimes/openclaw_multitenancy_runtime-olT3WX54rJ-DEFAULT",
     "/aws/bedrock-agentcore/runtimes/openclaw_multitenancy_exec_runtime-OkWZBw3ybK-DEFAULT",
-    "/openclaw/openclaw-multitenancy/agents",
+    "/openclaw/openclaw/agents",
 ]
 
 def _get_all_agentcore_log_groups() -> list:
@@ -61,7 +61,7 @@ def _get_all_agentcore_log_groups() -> list:
         cw = boto3.client("logs", region_name=GATEWAY_REGION)
         resp = cw.describe_log_groups(logGroupNamePrefix="/aws/bedrock-agentcore/runtimes/")
         groups = [g["logGroupName"] for g in resp.get("logGroups", [])]
-        extra = ["/openclaw/openclaw-multitenancy/agents"]
+        extra = ["/openclaw/openclaw/agents"]
         return groups + [g for g in extra if g not in groups]
     except Exception:
         return _LOG_GROUPS
@@ -229,7 +229,7 @@ def takeover_session(session_id: str, authorization: str = Header(default="")):
     server.py checks this before each invocation and skips openclaw if set.
     """
     user = require_role(authorization, roles=["admin", "manager"])
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     try:
         ssm = boto3.client("ssm", region_name=GATEWAY_REGION)
         ssm.put_parameter(
@@ -252,7 +252,7 @@ def takeover_session(session_id: str, authorization: str = Header(default="")):
 def return_session(session_id: str, authorization: str = Header(default="")):
     """Admin returns session to agent — resumes auto-reply."""
     user = require_role(authorization, roles=["admin", "manager"])
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     try:
         ssm = boto3.client("ssm", region_name=GATEWAY_REGION)
         ssm.delete_parameter(Name=f"/openclaw/{stack}/sessions/{session_id}/takeover")
@@ -273,7 +273,7 @@ def return_session(session_id: str, authorization: str = Header(default="")):
 def admin_send_message(session_id: str, body: dict, authorization: str = Header(default="")):
     """Admin sends a message while in takeover mode (bypasses agent)."""
     user = require_role(authorization, roles=["admin", "manager"])
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     message = body.get("message", "").strip()
     if not message:
         raise HTTPException(400, "message required")
@@ -306,7 +306,7 @@ def admin_send_message(session_id: str, body: dict, authorization: str = Header(
 def get_takeover_status(session_id: str, authorization: str = Header(default="")):
     """Check if a session is in takeover mode."""
     require_auth(authorization)
-    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    stack = os.environ.get("STACK_NAME", "openclaw")
     try:
         ssm = boto3.client("ssm", region_name=GATEWAY_REGION)
         param = ssm.get_parameter(Name=f"/openclaw/{stack}/sessions/{session_id}/takeover")
