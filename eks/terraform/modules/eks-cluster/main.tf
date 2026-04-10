@@ -9,7 +9,7 @@ data "aws_iam_session_context" "current" {
 
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "~> 21.0"
+  version = "~> 20.24"
 
   cluster_name    = var.name
   cluster_version = var.cluster_version
