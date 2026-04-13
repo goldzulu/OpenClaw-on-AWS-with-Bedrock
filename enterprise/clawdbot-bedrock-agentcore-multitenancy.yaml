@@ -339,6 +339,7 @@ Resources:
                 Action:
                   - 'bedrock-agentcore:InvokeAgentRuntime'
                   - 'bedrock-agentcore:GetAgentRuntime'
+                  - 'bedrock-agentcore:StopRuntimeSession'
                   - 'bedrock-agentcore:ListAgentRuntimes'
                   - 'bedrock-agentcore:CreateAgentRuntime'
                   - 'bedrock-agentcore:CreateAgentRuntimeEndpoint'
