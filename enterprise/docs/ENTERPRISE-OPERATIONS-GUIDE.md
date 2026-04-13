@@ -216,16 +216,16 @@ sudo su - ubuntu
 
 ```bash
 # Telegram — get token from @BotFather
-openclaw channels add telegram --token "YOUR_TELEGRAM_BOT_TOKEN"
+openclaw channels add --channel telegram --token "YOUR_TELEGRAM_BOT_TOKEN"
 
 # Discord — get token from discord.com/developers → Bot tab
-openclaw channels add discord --token "YOUR_DISCORD_BOT_TOKEN"
+openclaw channels add --channel discord --token "YOUR_DISCORD_BOT_TOKEN"
 
 # Slack — get token from api.slack.com/apps → Bot User OAuth Token
-openclaw channels add slack --bot-token "xoxb-YOUR_TOKEN" --app-token "xapp-YOUR_TOKEN"
+openclaw channels add --channel slack --bot-token "xoxb-YOUR_TOKEN" --app-token "xapp-YOUR_TOKEN"
 
 # Feishu / Lark — get App ID + Secret from Feishu Admin Console
-openclaw channels add feishu --app-id "YOUR_APP_ID" --app-secret "YOUR_APP_SECRET"
+openclaw channels add --channel feishu --app-id "YOUR_APP_ID" --app-secret "YOUR_APP_SECRET"
 
 # Verify all channels
 openclaw channels list
